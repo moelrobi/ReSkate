@@ -67,6 +67,22 @@ auto_update        Install new ReSkate releases when nobody is on (default true)
 activity_log       Log what players do (default true): throwdown drops placed,
                    joins, starts, turns and results; objects placed or removed;
                    how long players take to load.
+                   S.K.A.T.E. lines (set/copy, timeouts, "is out" and the result
+                   are appended to what earlier versions wrote, so
+                   parsers of those still match):
+                     <owner>'s S.K.A.T.E.: B landed (turn 4, copy)
+                     <owner>'s S.K.A.T.E.: B missed (turn 6, copy, timed out)
+                     <owner>'s S.K.A.T.E.: B is out (S.K.A.T.E.)
+                     <owner>'s S.K.A.T.E. has finished: A 13 landed / 1 missed,
+                       B 12 landed / 6 missed; winner A; letters A 0, B 5
+                   "turn N" is that player's own Nth turn, logged once. "set" is
+                   the first turn of a round; a missed copy (timed out too) is a
+                   letter, a missed set is not, and five letters is out. The
+                   result is written right after the deciding turn: the last
+                   player standing wins. When everyone else quit or left the
+                   server, or the game went quiet undecided for 90 s, it says
+                   "winner none". Turns of a player after they quit are not
+                   logged ("(quit)" on the result).
 
 "access" - Who runs the server and who always has a place on it.
 admins             SteamID64s (as strings) who may change settings in-game.

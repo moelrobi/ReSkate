@@ -64,6 +64,7 @@ bool valid_throwdown(const ThrowdownMessage &m) noexcept {
                std::all_of(m.order.begin(), m.order.end(), individual);
     case ThrowdownMessage::Kind::row: return m.board < max_throwdown_boards;
     case ThrowdownMessage::Kind::attempt:
+        return m.value > 0 && m.role <= ThrowdownMessage::Role::copy && !(m.timed_out && m.add);
     case ThrowdownMessage::Kind::turn_end: return m.value > 0;
     case ThrowdownMessage::Kind::close:
     case ThrowdownMessage::Kind::join:
@@ -115,6 +116,8 @@ std::vector<std::uint8_t> encode_throwdown(const ThrowdownMessage &m) {
         w.integer(static_cast<std::uint32_t>(m.value), 4);
         w.integer(m.add ? 1 : 0, 1);
         w.bytes.insert(w.bytes.end(), m.trick.begin(), m.trick.end());
+        w.integer(static_cast<std::uint8_t>(m.role), 1);
+        w.integer(m.timed_out ? 1 : 0, 1);
         break;
     case ThrowdownMessage::Kind::challenge_start:
         w.integer(m.series.size(), 1);
@@ -181,6 +184,10 @@ std::optional<ThrowdownMessage> decode_throwdown(std::span<const std::uint8_t> b
             if (landed > 1) return {};
             m.add = landed != 0;
             for (auto &byte : m.trick) byte = static_cast<std::uint8_t>(r.integer(1));
+            const auto role = r.integer(1), timed_out = r.integer(1);
+            if (role > 2 || timed_out > 1) return {};
+            m.role = static_cast<ThrowdownMessage::Role>(role);
+            m.timed_out = timed_out != 0;
             break;
         }
         case ThrowdownMessage::Kind::challenge_start: {

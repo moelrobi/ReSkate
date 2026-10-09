@@ -167,6 +167,10 @@ struct Relay {
     // Turn-based: how many turns each player has had in `running` on this server, and which
     // of a remote player's turns this server's timer failed before their attempt arrived.
     std::map<std::uint64_t, std::int32_t> turns, timer_failed;
+    // S.K.A.T.E. has one attempt per turn: the last turn the local player sent one for, and
+    // the last turn of each remote player whose attempt was replayed here.
+    std::int32_t own_attempt_turn{};
+    std::map<std::uint64_t, std::int32_t> replayed;
     std::uint64_t active{}; // whose turn this server started last
     std::uint64_t shown{};  // who is up as the local client shows it (hiding, camera)
     std::vector<std::uint64_t> players; // the running event's participants
@@ -377,6 +381,8 @@ void end_running(Relay &r) {
     r.remote.clear();
     r.turns.clear();
     r.timer_failed.clear();
+    r.own_attempt_turn = 0;
+    r.replayed.clear();
     r.active = 0;
     r.players.clear();
     r.quit.clear();
@@ -417,6 +423,8 @@ void set_running(Relay &r, const Key &key, const std::string &series) {
     r.remote.clear();
     r.turns.clear();
     r.timer_failed.clear();
+    r.own_attempt_turn = 0;
+    r.replayed.clear();
     r.active = 0;
     r.shown = 0;
     r.players.clear();
@@ -596,9 +604,16 @@ void on_local(Relay &r, ThrowdownLocalAction &a, std::uint64_t now) {
         // rest, e.g. a wipeout while watching); each one is replayed in that same turn.
         if (r.running && r.running_series == skate_mode && a.player && a.player == local_native_player_id() &&
             r.turns[r.local] > 0) {
+            if (r.own_attempt_turn >= r.turns[r.local]) {
+                note("own S.K.A.T.E. attempt ({}) for turn {} not sent: that turn's attempt already was.",
+                     a.add ? "landed" : "missed", r.turns[r.local]);
+                break;
+            }
             auto m = message(Kind::attempt, r.running->leader, r.running->id);
             m.value = r.turns[r.local]; m.add = a.add; m.trick = a.trick;
+            m.role = a.set ? ThrowdownMessage::Role::set : ThrowdownMessage::Role::copy;
             send(r, m);
+            r.own_attempt_turn = m.value;
             note("own S.K.A.T.E. attempt ({}) sent for turn {}.", a.add ? "landed" : "missed", m.value);
         }
         break;
@@ -606,11 +621,17 @@ void on_local(Relay &r, ThrowdownLocalAction &a, std::uint64_t now) {
         if (r.running && r.running_series == skate_mode)
             if (const auto player = player_of(r, a.player)) {
                 const auto turn = r.turns[*player];
-                if (*player == r.local && turn > 0) {
+                if (*player == r.local && turn > 0 && r.own_attempt_turn >= turn) {
+                    // An attempt still on its way to the local server when the timer ran out:
+                    // the others already have it for this turn.
+                    note("own S.K.A.T.E. turn {} ran out of time after its attempt was sent.", turn);
+                } else if (*player == r.local && turn > 0) {
                     // Out of time with nothing submitted: the others fail this turn the same way.
                     auto m = message(Kind::attempt, r.running->leader, r.running->id);
-                    m.value = turn; m.add = false;
+                    m.value = turn; m.add = false; m.timed_out = true;
+                    m.role = a.set ? ThrowdownMessage::Role::set : ThrowdownMessage::Role::copy;
                     send(r, m);
+                    r.own_attempt_turn = turn;
                     note("own S.K.A.T.E. turn {} ran out of time; sent as a miss.", turn);
                 } else if (*player != r.local) {
                     r.timer_failed[*player] = turn;
@@ -1269,13 +1290,18 @@ void maintain(Relay &r, std::uint64_t now) {
                     const char *what = entry.what == Remote::What::attempt ? "attempt" : "turn end";
                     const auto turn = r.turns[entry.player];
                     const auto failed = r.timer_failed.find(entry.player);
-                    if (turn > entry.value || (turn == entry.value && (r.active != entry.player ||
+                    const auto replayed = r.replayed.find(entry.player);
+                    if (entry.what == Remote::What::attempt && replayed != r.replayed.end() && replayed->second >= entry.value) {
+                        note("player {:#x}'s second attempt for turn {} dropped: that turn already has one.", entry.player, entry.value);
+                        done = true;
+                    } else if (turn > entry.value || (turn == entry.value && (r.active != entry.player ||
                                                                        (failed != r.timer_failed.end() && failed->second == turn)))) {
                         note("player {:#x}'s {} for turn {} arrived after this machine moved on.", entry.player, what, entry.value);
                         done = true;
                     } else if (turn == entry.value) {
                         done = entry.what == Remote::What::attempt ? queue_throwdown_attempt(id, entry.add, entry.trick)
                                                                    : queue_throwdown_end_turn(id);
+                        if (done && entry.what == Remote::What::attempt) r.replayed[entry.player] = entry.value;
                     } else if (r.remote_held_since && now - r.remote_held_since > attempt_wait_ms) {
                         note("player {:#x}'s {} for turn {} dropped: that turn never started here.", entry.player, what, entry.value);
                         done = true;

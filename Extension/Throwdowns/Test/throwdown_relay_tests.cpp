@@ -435,6 +435,10 @@ void skate_flow() {
     tick(in);
     check(calls.size() == 1 && calls[0].what == "landed" && calls[0].id == 0x303 && calls[0].mmid == 0xa1,
           "The leader's attempt was not replayed as theirs in their turn");
+    // A turn has one attempt: the same turn's again (sent twice) is not replayed.
+    remote_attempt(leader, 1, false, 0xa2);
+    tick(in);
+    check(calls.size() == 1, "A second attempt for the same turn was replayed");
     check(throwdown_relay_hides(other) && !throwdown_relay_hides(leader) && !throwdown_relay_hides(76561198000000099ULL),
           "Only the player who is up should be shown (and nobody outside the throwdown hidden)");
     // Another player's attempt that arrives before their turn starts here waits for it.
@@ -446,8 +450,9 @@ void skate_flow() {
     mine.player = 2; mine.add = true; mine.trick[0] = 0xc1;
     throwdown_relay_local(std::move(mine));
     auto out = tick(in);
-    check(out.size() == 1 && out[0].kind == Kind::attempt && out[0].value == 1 && out[0].add && out[0].trick[0] == 0xc1,
-          "The local attempt was not relayed with its turn number");
+    check(out.size() == 1 && out[0].kind == Kind::attempt && out[0].value == 1 && out[0].add && out[0].trick[0] == 0xc1 &&
+              out[0].role == ThrowdownMessage::Role::copy && !out[0].timed_out,
+          "The local attempt was not relayed with its turn number and as a copy");
     ThrowdownLocalAction skate_end{Local::turn_ended};
     skate_end.player = 2;
     throwdown_relay_local(std::move(skate_end));
@@ -464,11 +469,17 @@ void skate_flow() {
     // Round 2: out of time on the local turn goes out as a miss.
     turn_started(2);
     ThrowdownLocalAction timeout{Local::timer_failed};
-    timeout.player = 2;
+    timeout.player = 2; timeout.set = true;
     throwdown_relay_local(std::move(timeout));
     out = tick(in);
-    check(out.size() == 1 && out[0].kind == Kind::attempt && out[0].value == 2 && !out[0].add,
-          "A local timeout was not relayed as a miss");
+    check(out.size() == 1 && out[0].kind == Kind::attempt && out[0].value == 2 && !out[0].add && out[0].timed_out &&
+              out[0].role == ThrowdownMessage::Role::set,
+          "A local timeout was not relayed as a timed-out miss of a set");
+    // The attempt that was still on its way when the timer ran out: that turn was sent already.
+    ThrowdownLocalAction late{Local::attempt};
+    late.player = 2; late.add = false; late.set = true;
+    throwdown_relay_local(std::move(late));
+    check(tick(in).empty(), "A second attempt for the same local turn was relayed");
     // This machine's timer failed the other player's turn first: their late attempt is dropped.
     turn_started(0x305);
     ThrowdownLocalAction local_timer{Local::timer_failed};

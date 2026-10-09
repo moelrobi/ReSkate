@@ -32,7 +32,7 @@ class ActivityLog {
     void objects(std::uint64_t owner, const std::vector<NetworkObject> &before, const std::vector<NetworkObject> &after);
     void left(std::uint64_t player);
     // Every throwdown went with the world (map change), or logging was turned off.
-    void clear() { throwdowns_.clear(); }
+    void clear() { throwdowns_.clear(); finished_.clear(); }
     // Ends throwdowns that went quiet: a finished one sends nothing more.
     void tick(std::uint64_t now);
 
@@ -47,19 +47,28 @@ class ActivityLog {
         std::map<std::uint64_t, std::int64_t> total;      // Jam: running total; Spot Battle: best turn
         std::map<std::uint64_t, std::int64_t> turn;       // Spot Battle: this turn's points so far
         std::map<std::uint64_t, std::array<unsigned, 2>> tries; // S.K.A.T.E.: landed, missed
+        // S.K.A.T.E.: the last turn logged for each player (one attempt per turn), letters from
+        // failed copies, players out on letters and players who left the server during it.
+        std::map<std::uint64_t, std::int32_t> attempted;
+        std::map<std::uint64_t, unsigned> letters;
+        std::set<std::uint64_t> out, gone;
         std::uint64_t leading{}, lead_logged{};           // Jam
     };
     using Key = std::pair<std::uint64_t, std::uint32_t>; // leader, the leader's number for it
 
     std::string name(std::uint64_t player);
     std::string title(const Key &key, const Throwdown &t); // "Zee's S.K.A.T.E."
-    void finish(const Key &key, const Throwdown &t);
+    // `winner`: S.K.A.T.E.'s, as its game decided it (0: none, or not decided).
+    void finish(const Key &key, const Throwdown &t, std::uint64_t winner = 0);
+    // S.K.A.T.E.: whether the game is over by its own rule; logs the result and forgets it if so.
+    bool decide(std::map<Key, Throwdown>::iterator it);
 
     Log log_;
     Name name_;
     Log announce_;
     std::map<std::uint64_t, std::string> names_; // everyone seen, for lines after they left
     std::map<Key, Throwdown> throwdowns_;
+    std::map<Key, std::uint64_t> finished_; // decided S.K.A.T.E. games -> when: later messages say nothing
     std::map<std::uint64_t, std::uint64_t> announced_; // leader -> their last drop told in chat
 };
 } // namespace dingosdk::server

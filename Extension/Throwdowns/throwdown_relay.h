@@ -86,6 +86,8 @@ struct ThrowdownLocalAction {
     std::uint8_t board{};                          // row: index in the event's leaderboard manager
     bool add{};                                    // row: added (else set); attempt: landed; beacon_placed: moved
     std::uint32_t player{};                        // turn_started, timer_failed; attempt: whose turn it was
+    bool set{};                                    // attempt, timer_failed: that turn was a set (its player
+                                                   // first in the S.K.A.T.E. turn order), else a copy
     std::array<std::uint8_t, 28> trick{};          // attempt: CompositeTrickRecord
     std::string challenge;                         // challenge_started: the challenge's Id
     std::vector<std::uint8_t> criteria, indexes;   // challenge_attempt
