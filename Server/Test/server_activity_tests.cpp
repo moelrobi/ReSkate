@@ -102,6 +102,99 @@ int main() {
     log.throwdown(zee, wire(Kind::close), nullptr, 302'000'000);
     check(lines.empty(), "a running throwdown ignores a close");
 
+    // S.K.A.T.E. scored: sets, copies, a timeout, letters, the player out and the result at once.
+    lines.clear();
+    std::uint32_t game = 8;
+    const auto skate_wire = [&](ThrowdownMessage m) {
+        m.leader = zee;
+        m.id = game;
+        return multiplayer::encode_throwdown(m);
+    };
+    const auto begin = [&](std::vector<std::uint64_t> players, std::uint64_t now) {
+        ThrowdownMessage offer;
+        offer.kind = Kind::offer;
+        offer.series = "ThrowdownSkate";
+        offer.placement = {1};
+        log.throwdown(zee, skate_wire(offer), nullptr, now);
+        ThrowdownMessage go;
+        go.kind = Kind::start;
+        go.order = std::move(players);
+        log.throwdown(zee, skate_wire(go), nullptr, now);
+    };
+    using Role = ThrowdownMessage::Role;
+    const auto play = [&](std::uint64_t who, int number, bool landed, Role role, std::uint64_t now, bool timed_out = false) {
+        ThrowdownMessage m;
+        m.kind = Kind::attempt;
+        m.value = number;
+        m.add = landed;
+        m.role = role;
+        m.timed_out = timed_out;
+        log.throwdown(who, skate_wire(m), nullptr, now);
+    };
+    begin({zee, kush}, 400'000'000);
+    play(zee, 1, true, Role::set, 401'000'000);
+    play(kush, 1, false, Role::copy, 402'000'000, true);
+    check(said("[throwdown] Zee's S.K.A.T.E.: Zee landed (turn 1, set)"), "a set is marked");
+    check(said("[throwdown] Zee's S.K.A.T.E.: Kush missed (turn 1, copy, timed out)"), "a timed-out copy is marked");
+    auto count = lines.size();
+    play(kush, 1, false, Role::copy, 402'500'000);
+    check(lines.size() == count, "a second attempt for the same turn is not logged");
+    play(zee, 2, false, Role::set, 403'000'000); // a failed set gives no letter
+    // Kush sets and Zee copies, then Zee sets and Kush fails to copy: four more letters.
+    for (int i = 2; i <= 5; ++i) {
+        play(kush, 2 * i - 2, true, Role::set, 404'000'000 + i);
+        play(zee, 2 * i - 1, true, Role::copy, 404'100'000 + i);
+        play(zee, 2 * i, true, Role::set, 404'200'000 + i);
+        play(kush, 2 * i - 1, false, Role::copy, 404'300'000 + i);
+    }
+    check(said("[throwdown] Zee's S.K.A.T.E.: Kush is out (S.K.A.T.E.)"), "five failed copies put a player out");
+    check(lines.size() >= 2 && lines[lines.size() - 2] == "[throwdown] Zee's S.K.A.T.E.: Kush is out (S.K.A.T.E.)" &&
+              lines.back() == "[throwdown] Zee's S.K.A.T.E. has finished: Zee 9 landed / 1 missed, Kush 4 landed / 5 missed; "
+                              "winner Zee; letters Zee 0, Kush 5",
+          "the result follows the deciding attempt with the winner and letters");
+    count = lines.size();
+    play(kush, 20, false, Role::copy, 405'000'000);
+    log.throwdown(kush, skate_wire(ThrowdownMessage{.kind = Kind::leave}), nullptr, 405'000'000);
+    log.tick(900'000'000);
+    check(lines.size() == count, "nothing more is logged for a decided game");
+
+    // Everyone else quit: the game ends without a winner.
+    lines.clear();
+    game = 9;
+    begin({zee, kush}, 1'000'000'000);
+    play(zee, 1, false, Role::set, 1'001'000'000);
+    log.throwdown(kush, skate_wire(ThrowdownMessage{.kind = Kind::leave}), nullptr, 1'002'000'000);
+    check(lines.back() == "[throwdown] Zee's S.K.A.T.E. has finished: Zee 0 landed / 1 missed, Kush 0 landed / 0 missed (quit); "
+                          "winner none; letters Zee 0, Kush 0",
+          "a game everyone else quit has no winner");
+
+    // Three players: one out on letters, one gone from the server: the last one standing wins.
+    lines.clear();
+    game = 10;
+    begin({zee, kush, tally}, 1'100'000'000);
+    for (int i = 1; i <= 5; ++i) {
+        play(zee, i, true, Role::set, 1'101'000'000 + i);
+        play(kush, i, true, Role::copy, 1'101'100'000 + i);
+        play(tally, i, false, Role::copy, 1'101'200'000 + i);
+    }
+    check(said("[throwdown] Zee's S.K.A.T.E.: Tally is out (S.K.A.T.E.)") && !said("[throwdown] Zee's S.K.A.T.E. has finished"),
+          "the game goes on while two players stand");
+    log.left(kush);
+    check(lines.back() == "[throwdown] Zee's S.K.A.T.E. has finished: Zee 5 landed / 0 missed, Kush 5 landed / 0 missed, "
+                          "Tally 0 landed / 5 missed; winner Zee; letters Zee 0, Kush 0, Tally 5",
+          "the last player standing wins once the others are out or gone");
+
+    // Undecided when it goes quiet: no winner. An attempt the server has no game for (it restarted)
+    // still names S.K.A.T.E.
+    lines.clear();
+    game = 11;
+    play(kush, 3, false, Role::copy, 1'200'000'000);
+    check(lines.size() == 1 && lines[0] == "[throwdown] Zee's S.K.A.T.E.: Kush missed (turn 3, copy)",
+          "an attempt for an unknown game is logged as S.K.A.T.E.");
+    log.tick(1'400'000'000);
+    check(lines.back() == "[throwdown] Zee's S.K.A.T.E. has finished: Kush 0 landed / 1 missed; winner none; letters Kush 1",
+          "an undecided game that goes quiet has no winner");
+
     // Objects: a few are listed, many are summed up, moves say nothing.
     lines.clear();
     std::vector<NetworkObject> before, after;

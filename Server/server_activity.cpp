@@ -1,6 +1,7 @@
 #include "server_activity.h"
 #include "Extension/Throwdowns/throwdown_wire.h"
 #include <algorithm>
+#include <iterator>
 #include <format>
 
 namespace dingosdk::server {
@@ -15,6 +16,10 @@ constexpr std::uint64_t queue_forget_us = 60'000'000;
 // and a Jam a score whenever anyone scores; after this long without any it has finished.
 constexpr std::uint64_t jam_quiet_us = 60'000'000, turns_quiet_us = 90'000'000;
 constexpr std::uint64_t lead_interval_us = 15'000'000;
+// A decided S.K.A.T.E. is remembered this long, so what its players still send about it is ignored.
+constexpr std::uint64_t finished_forget_us = 600'000'000;
+// S.K.A.T.E.: each failed copy is a letter; this many and the player is out.
+constexpr unsigned letters_to_lose = 5;
 // Chat about drops placed: at most one line per leader this often (offers are cheap to send).
 constexpr std::uint64_t announce_interval_us = 30'000'000;
 // More objects than this in one change are summed up instead of listed.
@@ -54,6 +59,7 @@ void ActivityLog::throwdown(std::uint64_t sender, std::span<const std::uint8_t> 
     if (!decoded) return;
     const auto &m = *decoded;
     const Key key{m.leader, m.id};
+    if (finished_.contains(key)) return;
     auto found = throwdowns_.find(key);
     if (m.kind == Kind::offer) {
         if (sender != m.leader) return;
@@ -85,6 +91,11 @@ void ActivityLog::throwdown(std::uint64_t sender, std::span<const std::uint8_t> 
         // Started before the server saw its offer (it restarted, or the map changed back).
         if (m.kind == Kind::close || m.kind == Kind::leave) return;
         found = throwdowns_.emplace(key, Throwdown{}).first;
+        // Only a running S.K.A.T.E. sends attempts: keep its name and give it a result.
+        if (m.kind == Kind::attempt) {
+            found->second.series = skate;
+            found->second.started = true;
+        }
     }
     auto &t = found->second;
     t.last = now;
@@ -105,6 +116,7 @@ void ActivityLog::throwdown(std::uint64_t sender, std::span<const std::uint8_t> 
         if (t.started) {
             if (!t.quit.insert(sender).second) return;
             log_("[throwdown] " + who + " quit " + title(key, t));
+            if (decide(found)) return;
             if (std::ranges::all_of(t.players, [&](std::uint64_t p) { return t.quit.contains(p); })) throwdowns_.erase(found);
             return;
         }
@@ -150,22 +162,56 @@ void ActivityLog::throwdown(std::uint64_t sender, std::span<const std::uint8_t> 
                          best != t.total.end() ? " (best " + points(best->second) + ")" : ""));
         return;
     }
-    case Kind::attempt:
+    case Kind::attempt: {
+        // One attempt per turn: a second one for a turn already logged is a repeat.
+        if (const auto last = t.attempted.find(sender); last != t.attempted.end() && m.value <= last->second) return;
+        t.attempted[sender] = m.value;
         ++t.tries[sender][m.add ? 0 : 1];
-        log_(std::format("[throwdown] {}: {} {} (turn {})", title(key, t), who, m.add ? "landed" : "missed", m.value));
+        using Role = ThrowdownMessage::Role;
+        log_(std::format("[throwdown] {}: {} {} (turn {}{}{})", title(key, t), who, m.add ? "landed" : "missed", m.value,
+                         m.role == Role::set ? ", set" : m.role == Role::copy ? ", copy" : "",
+                         m.timed_out ? ", timed out" : ""));
+        // A failed set gives no letter; a failed copy (timed out too) gives one.
+        if (m.role == Role::copy && !m.add && !t.out.contains(sender) && ++t.letters[sender] >= letters_to_lose) {
+            t.out.insert(sender);
+            log_(std::format("[throwdown] {}: {} is out (S.K.A.T.E.)", title(key, t), who));
+        }
+        decide(found);
         return;
+    }
     }
 }
 
-void ActivityLog::finish(const Key &key, const Throwdown &t) {
+// S.K.A.T.E. as each player's game plays it: it goes on until one player is left standing
+// (not out on letters, not quit, still here). When everyone else quit or left instead, the
+// last player's game ends it with no winner (Extension/Throwdowns/throwdown_relay.cpp, end_alone).
+bool ActivityLog::decide(std::map<Key, Throwdown>::iterator it) {
+    auto &t = it->second;
+    if (t.series != skate || !t.started || t.players.size() < 2) return false;
+    std::vector<std::uint64_t> standing;
+    bool lettered{};
+    for (const auto player : t.players) {
+        if (t.out.contains(player)) lettered = true;
+        else if (!t.quit.contains(player) && !t.gone.contains(player)) standing.push_back(player);
+    }
+    if (standing.size() > 1) return false;
+    finish(it->first, t, standing.size() == 1 && lettered ? standing.front() : 0);
+    finished_[it->first] = t.last;
+    throwdowns_.erase(it);
+    return true;
+}
+
+void ActivityLog::finish(const Key &key, const Throwdown &t, std::uint64_t winner) {
     std::vector<std::uint64_t> order = t.players;
     for (const auto &[player, value] : t.total)
+        if (std::ranges::find(order, player) == order.end()) order.push_back(player);
+    for (const auto &[player, tries] : t.tries)
         if (std::ranges::find(order, player) == order.end()) order.push_back(player);
     const auto total = [&](std::uint64_t player) {
         const auto it = t.total.find(player);
         return it == t.total.end() ? std::int64_t{} : it->second;
     };
-    // S.K.A.T.E. is won on letters, which the server does not see: its players stay in turn order.
+    // S.K.A.T.E. is won on letters: its players stay in turn order.
     const bool ranked = t.series != skate;
     if (ranked) std::ranges::stable_sort(order, [&](std::uint64_t a, std::uint64_t b) { return total(a) > total(b); });
     std::string results;
@@ -181,10 +227,21 @@ void ActivityLog::finish(const Key &key, const Throwdown &t) {
         if (t.quit.contains(player)) entry += " (quit)";
         results += (results.empty() ? "" : ", ") + entry;
     }
-    log_("[throwdown] " + title(key, t) + " has finished" + (results.empty() ? "" : ": " + results));
+    std::string decided;
+    if (!ranked) {
+        // Appended, so the counts before it read as they always did.
+        std::string letters;
+        for (const auto player : order) {
+            const auto it = t.letters.find(player);
+            letters += std::format("{}{} {}", letters.empty() ? "" : ", ", name(player), it == t.letters.end() ? 0U : it->second);
+        }
+        decided = "; winner " + (winner ? name(winner) : std::string("none")) + (letters.empty() ? "" : "; letters " + letters);
+    }
+    log_("[throwdown] " + title(key, t) + " has finished" + (results.empty() ? "" : ": " + results) + decided);
 }
 
 void ActivityLog::tick(std::uint64_t now) {
+    std::erase_if(finished_, [&](const auto &entry) { return now > entry.second && now - entry.second > finished_forget_us; });
     for (auto it = throwdowns_.begin(); it != throwdowns_.end();) {
         const auto &t = it->second;
         const auto quiet = now > t.last ? now - t.last : 0;
@@ -207,8 +264,19 @@ void ActivityLog::left(std::uint64_t player) {
         auto &t = it->second;
         std::erase(t.queue, player);
         // A queue goes with its leader; a running throwdown carries on for the others.
-        if (!t.started && it->first.first == player) it = throwdowns_.erase(it);
-        else ++it;
+        if (!t.started && it->first.first == player) {
+            it = throwdowns_.erase(it);
+            continue;
+        }
+        // A S.K.A.T.E. player who left plays no more turns: it may be over for the others.
+        if (t.started && std::ranges::find(t.players, player) != t.players.end() && t.gone.insert(player).second) {
+            const auto next = std::next(it);
+            if (decide(it)) {
+                it = next;
+                continue;
+            }
+        }
+        ++it;
     }
 }
 

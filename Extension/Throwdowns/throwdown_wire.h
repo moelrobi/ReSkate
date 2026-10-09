@@ -19,7 +19,7 @@ struct ThrowdownMessage {
         score = 6, // the sender's running score in the leader's throwdown (Jam)
         row = 7,   // one leaderboard write of the sender's, as its client made it (Spot Battle)
         turn_end = 8, // the sender's value-th turn ended
-        attempt = 9,  // the sender's S.K.A.T.E. attempt in its value-th turn (add = landed)
+        attempt = 9,  // the sender's S.K.A.T.E. attempt in its value-th turn (add = landed, role, timed_out)
         // Coop challenges (analysis/coop-challenges-mp.md). `leader` started challenge `challenge`
         // of series `series`; `id` is its own number for this run.
         challenge_start = 10,   // order = the participants (leader first); add = contest mode
@@ -45,6 +45,10 @@ struct ThrowdownMessage {
     std::uint8_t board{};             // row: the leaderboard's index in the event's leaderboard manager
     bool add{};                       // row: added to the row (else the row is set to value); attempt: landed
     std::array<std::uint8_t, 28> trick{}; // attempt: the CompositeTrickRecord, bit-exact
+    // attempt: whether the turn was a set (its player first in the turn order) or a copy, and
+    // whether the turn's timer failed it (a miss with no attempt made).
+    enum class Role : std::uint8_t { unknown = 0, set = 1, copy = 2 } role{};
+    bool timed_out{};
     std::string challenge;                // challenge_start: the challenge's Id (e.g. Plot-014-OTS-03)
     // challenge_attempt: CriteriaData[] (0x14 bytes each) and SentIndexes[] (i32 each), bit-exact.
     std::vector<std::uint8_t> criteria, indexes;

@@ -592,6 +592,12 @@ bool skate_running() {
     std::lock_guard lock(lab().mutex);
     return lab().series == "ThrowdownSkate";
 }
+// Whether `player`'s turn is a set: ServerSkateThrowdown's attempt handler takes the player at
+// index 0 of the turn order (skate_order, as the order hooks above leave it) as the setter.
+bool skate_setter(std::uint32_t player) {
+    std::lock_guard lock(lab().skate_mutex);
+    return player && !lab().skate_order.empty() && lab().skate_order.front() == player;
+}
 std::vector<std::uint32_t> read_ids(Address array) {
     const auto data = array ? read<Address>(array) : 0;
     const auto count = data ? read<std::uint32_t>(data - 4) & 0x7fffffffU : 0U;
@@ -1572,6 +1578,7 @@ void observe_throwdown_send(std::uint32_t hash, Address type, Address payload) n
                 action.add = read<std::uint8_t>(payload + attempt_landed_offset) != 0;
                 action.trick = read<std::array<std::uint8_t, 28>>(payload + attempt_trick_offset);
                 action.player = l.server_active.load(std::memory_order_acquire);
+                action.set = skate_setter(action.player);
                 throwdown_relay_local(std::move(action));
             } else {
                 logging::write(logging::Level::warning, logging::Channel::progression,
@@ -1824,6 +1831,7 @@ void pump_throwdown_lab(Address vm) noexcept {
                         "Throwdowns: S.K.A.T.E. turn of player {:#x} ran out of time.", l.server_active.load());
                     ThrowdownLocalAction action{ThrowdownLocalAction::Kind::timer_failed};
                     action.player = l.server_active.load(std::memory_order_acquire);
+                    action.set = skate_setter(action.player);
                     throwdown_relay_local(std::move(action));
                 }
             }

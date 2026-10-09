@@ -671,6 +671,14 @@ void throwdown_codec() {
     attempt.value = 3; attempt.add = true;
     for (std::size_t i = 0; i < attempt.trick.size(); ++i) attempt.trick[i] = static_cast<std::uint8_t>(i * 7);
     check(decode_throwdown(encode_throwdown(attempt)) == attempt, "Throwdown S.K.A.T.E. attempt failed to round-trip");
+    auto timed_out = attempt; timed_out.add = false; timed_out.role = ThrowdownMessage::Role::copy; timed_out.timed_out = true;
+    check(decode_throwdown(encode_throwdown(timed_out)) == timed_out, "A timed-out S.K.A.T.E. copy failed to round-trip");
+    auto no_role = encode_throwdown(timed_out);
+    no_role[no_role.size() - 2] = 3;
+    check(!decode_throwdown(no_role), "A S.K.A.T.E. attempt with an unknown role decoded");
+    auto landed_late = timed_out; landed_late.add = true;
+    try { static_cast<void>(encode_throwdown(landed_late)); check(false, "A landed attempt that timed out was encoded"); }
+    catch (const std::invalid_argument &) {}
     auto no_turn = attempt; no_turn.value = 0;
     try { static_cast<void>(encode_throwdown(no_turn)); check(false, "An attempt without a turn was encoded"); }
     catch (const std::invalid_argument &) {}
