@@ -1,0 +1,51 @@
+# Temporary: builds ReSkate.dll (Windows) and the Linux dedicated server for testing this branch.
+name: Build
+
+on:
+  push:
+    branches: [claude/epic-newton-86kpgc]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-dll:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset vs2022-x64
+      - name: Build ReSkate.dll
+        run: cmake --build --preset release --target dingosdk_runtime --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkate-dll
+          path: |
+            build/vs2022-x64/Release/ReSkate.dll
+            build/vs2022-x64/Release/ReSkate.pdb
+          if-no-files-found: error
+
+  linux-server:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev
+      - name: Configure
+        run: cmake --preset linux-x64
+      - name: Build ReSkateServer
+        run: cmake --build --preset linux-release --target dingosdk_server -j"$(nproc)"
+      - name: Test server activity log
+        run: |
+          cmake -S . -B build/tests -DCMAKE_BUILD_TYPE=Release -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON
+          cmake --build build/tests --target dingosdk_server_activity_tests -j"$(nproc)"
+          ./build/tests/dingosdk_server_activity_tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkateServer-linux
+          path: |
+            build/linux/ReSkateServer
+            Server/README.txt
+            Server/README-linux.md
+          if-no-files-found: error
