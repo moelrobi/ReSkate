@@ -406,6 +406,19 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
   announce-to <player> <text>   Tell one player, on a card.
   announcements [list | add <text> | remove <n> | clear | interval <minutes>|off]
                                 The messages posted on a timer.
+  race-finish [<x y z> <radius>|off]   Show, set (radius 1-200 m) or clear the
+                                finish zone, a sphere on the current map. x y z
+                                are world units as the log prints them; y is up.
+                                Kept in memory only and dropped on a map change.
+  race-checkpoint [add <x y z> <radius> | clear]   Checkpoints (at most 16) a
+                                racer must pass in order before the finish counts.
+  race-start <SteamID64,SteamID64,...> [timeout <seconds>]   Time those players
+                                (at most 64, in the world) from now to the finish;
+                                the race ends when all finished or left, or after
+                                the timeout (default 300 s). Logged as
+                                "[race] <name> (<SteamID64>) finished <place> in 48.3 s"
+                                and "[race] ended: 1. <name> 48.3 s, <name> DNF".
+  race-stop                     End the race now; the rest did not finish.
   activity-log on|off           Log player activity (see activity_log).
   announce-throwdowns on|off    Chat message when a throwdown is placed.
   parties [on|off]              List the parties, or allow them (off ends them all).

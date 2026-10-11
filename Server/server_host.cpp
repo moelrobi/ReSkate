@@ -1752,6 +1752,7 @@ void Host::tick(std::uint64_t now) {
     tick_rotation();
     tick_announcements();
     remove_away();
+    tick_race();
     std::erase_if(vote_cooldowns_, [&](const auto &entry) { return now_ >= entry.second; });
     join_backoff_.prune(now_);
 }
