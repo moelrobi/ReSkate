@@ -74,6 +74,7 @@ enum class DebugAction {
     set_first_person_head_roll,
     set_first_person_bob,
     set_first_person_board_only,
+    set_first_person_camera_cycle,
     reset_first_person_arm,
     set_free_camera_fov,  // 0 = the game's own FOV
     // Keep the last action in sync with the bound in request_scheduler.h.
@@ -215,6 +216,13 @@ struct RoadRashModel {
     bool available = false, enabled = false, blood = false;
 };
 
+// Board Break's switch (Extension/BoardBreak/board_break.h): started, switched on, and which of
+// its decks is the one in the game (none: no deck pack loads, and no board can break).
+struct BoardBreakModel {
+    bool available = false, enabled = false, has_deck = false;
+    std::string deck = "None";
+};
+
 struct Model {
     std::string state = "Waiting for native state";
     std::string detail;
@@ -235,6 +243,7 @@ struct Model {
     PlayerCardModel player_card;
     HallOfMeatModel hall_of_meat;
     RoadRashModel road_rash;
+    BoardBreakModel board_break;
     ObjectPersistenceModel object_persistence;
     ParkEditorModel editor;
     float menu_scale = default_menu_scale;
@@ -288,6 +297,7 @@ void set_multiplayer_queue(MultiplayerQueue) noexcept;
 struct MapDownloadCard {
     int stage{};                // 0 none, 1 asking, 2 downloading, 3 installing, 4 applying, 5 joining
     std::string map, package, author, version, description;
+    std::string have;            // the version installed here, when the host's replaces it
     std::size_t step{}, steps{}; // applying: the merge's steps done of all
     std::string step_name;
     bool server{}, installed{}, moved{}, choice{true};

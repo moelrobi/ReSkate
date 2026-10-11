@@ -79,9 +79,17 @@ void stop(Session &s, std::string reason) {
     s.sync_effects = true;
     set_lobby_object_limit(0);
     s.server_admin = false;
+    s.role.clear();
+    s.own_tag.clear();
+    s.own_tag_color = 0;
+    s.role_all_commands = false;
+    s.role_commands.clear();
+    s.role_permissions = 0;
     s.server_bans.clear();
     s.server_ban_total = 0;
     s.server_maps.clear();
+    text::set_own_words({}, {}); // the server's own filtered words go with it
+    s.chat_masked.clear();
     s.server_map_pool.clear();
     s.server_map_rotation = 0;
     set_lobby_object_placement_allowed(true);
@@ -648,7 +656,9 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                 p.native_status = !p.shown_wanted ? "Further away than players are shown."
                                   : sampled       ? "Waiting for the player's cosmetic recipe."
                                                   : "Waiting for player poses.";
-                // No skater for them, but still their name or dot where they are.
+                // No skater for them, but still their name or dot where they are, and where the
+                // Social menu's teleport and spectate find them.
+                if (!p.shown_wanted && sampled) update_party_position(&p.render_pose);
                 if (!p.shown_wanted && sampled && labels) label(p);
             }
         }
@@ -789,7 +799,11 @@ bool prepare_join_map(Session &s, bool ready, std::string_view current, MapLoade
     if (!s.last_map_load_check || now - s.last_map_load_check >= 500000) {
         s.last_map_load_check = now;
         std::string detail;
-        const auto result = loader(s.join_destination, s.map_load_submitted, detail);
+        // The host's map, installed here at another version: it is not loaded as it is. It is
+        // fetched at the host's version as a missing one is (the downloader puts it in the
+        // installed one's place), and loads when the two agree.
+        const auto have = std::string(other_map_version(s.map_package, host_map_package(s.join_destination)));
+        const auto result = have.empty() ? loader(s.join_destination, s.map_load_submitted, detail) : MapLoadResult::missing;
         if (result == MapLoadResult::missing) {
             const auto name = s.map_label.empty() ? world_level_name(world_destination_asset(s.join_destination)) : s.map_label;
             const char *who = dedicated_host(s) ? "server" : "host";
@@ -802,7 +816,7 @@ bool prepare_join_map(Session &s, bool ready, std::string_view current, MapLoade
                 if (!s.fetching_since) {
                     s.fetching_since = now;
                     fetching_map_flag.store(true, std::memory_order_relaxed);
-                    s.map_need = MapNeed{s.map_package, name, dedicated_host(s), s.travelling};
+                    s.map_need = MapNeed{s.map_package, name, dedicated_host(s), s.travelling, have};
                     s.rejoin = Session::Rejoin{{s.host_id, s.secret}, s.password};
                     s.last_map_request = s.last_world_ready = 0;   // say so at once
                 }
