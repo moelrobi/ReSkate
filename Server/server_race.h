@@ -160,6 +160,15 @@ inline std::string race_finish_line(const Racer &racer) {
     return "[race] " + one_line(racer.name) + " (" + std::to_string(racer.id) + ") finished " + std::to_string(racer.place) +
            " in " + race_seconds(racer.ms.value_or(0)) + " s";
 }
+// "[race] <name> (<id>) checkpoint <k>/<total> in 12.3 s" for each checkpoint passed since `from`
+// (racer.next before the step), in order; the time is the race clock's, without any penalty.
+inline std::vector<std::string> race_checkpoint_lines(const Racer &racer, std::size_t from, std::size_t total, std::uint64_t ms) {
+    std::vector<std::string> lines;
+    for (auto k = from + 1; k <= racer.next; ++k)
+        lines.push_back("[race] " + one_line(racer.name) + " (" + std::to_string(racer.id) + ") checkpoint " + std::to_string(k) + "/" +
+                        std::to_string(total) + " in " + race_seconds(ms) + " s");
+    return lines;
+}
 // "[race] <name> (<id>) false start: 12.3 m from the start".
 inline std::string race_false_start_line(const Racer &racer, float metres) {
     return "[race] " + one_line(racer.name) + " (" + std::to_string(racer.id) + ") false start: " + race_tenths(metres) +

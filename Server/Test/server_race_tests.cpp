@@ -215,5 +215,31 @@ int main() {
     field[0].penalty = 5;
     check(race_results_line(field) == "[race] ended: A DNF (false start), B DNF, C DNF", "a penalised DNF");
     check(race_results_line(field).find('\n') == std::string::npos, "still one line");
+    // Checkpoint lines.
+    Racer runner{.id = 76561198000000001, .name = "Kush"};
+    const std::vector<RaceZone> course{{{0, 0, 0}, 5}, {{50, 0, 0}, 5}};
+    std::size_t from = runner.next;
+    check(!race_step(runner.next, course, finish, {1, 0, 0}) &&
+              race_checkpoint_lines(runner, from, course.size(), 12345) ==
+                  std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 1/2 in 12.3 s"},
+          "one checkpoint, one line");
+    from = runner.next;
+    check(!race_step(runner.next, course, finish, {1, 0, 0}) && race_checkpoint_lines(runner, from, course.size(), 13000).empty(),
+          "staying in it logs nothing");
+    check(!race_step(runner.next, course, finish, {50, 0, 0}) && race_checkpoint_lines(runner, from, 2, 20000) ==
+              std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 2/2 in 20.0 s"},
+          "resuming logs only the next one");
+    Racer quick{.id = 9, .name = "Bad\nName"};
+    const std::vector<RaceZone> stacked{{{0, 0, 0}, 5}, {{2, 0, 0}, 5}, {{90, 0, 0}, 1}};
+    from = quick.next;
+    race_step(quick.next, stacked, finish, {1, 0, 0});
+    check(race_checkpoint_lines(quick, from, stacked.size(), 4049) ==
+              std::vector<std::string>{"[race] Bad Name (9) checkpoint 1/3 in 4.0 s", "[race] Bad Name (9) checkpoint 2/3 in 4.0 s"},
+          "overlapping checkpoints: a line each, in order, names on one line");
+    from = quick.next;
+    check(race_step(quick.next, stacked, finish, {90, 0, 0}) &&
+              race_checkpoint_lines(quick, from, stacked.size(), 9000) ==
+                  std::vector<std::string>{"[race] Bad Name (9) checkpoint 3/3 in 9.0 s"},
+          "the last checkpoint is logged in the tick it finishes");
     return 0;
 }

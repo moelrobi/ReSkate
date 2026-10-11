@@ -143,6 +143,7 @@ void Host::tick_race() {
         return;
     }
     if (!race.running) return;
+    const auto elapsed = (now_ - race.started) / 1000;
     for (auto &racer : race.racers) {
         if (racer.ms || racer.left || racer.disqualified) continue; // a DNF false start races but holds nothing up
         const auto *guest = find(racer.id);
@@ -151,12 +152,15 @@ void Host::tick_race() {
             continue;
         }
         if (!guest->world_ready || !guest->latest_root) continue;
-        if (!race_step(racer.next, race.checkpoints, *race.finish, guest->latest_root->position)) continue;
-        racer.ms = (now_ - race.started) / 1000 + std::uint64_t{racer.penalty} * 1000;
+        const auto from = racer.next;
+        const bool crossed = race_step(racer.next, race.checkpoints, *race.finish, guest->latest_root->position);
+        for (const auto &line : race_checkpoint_lines(racer, from, race.checkpoints.size(), elapsed)) log_(line);
+        if (!crossed) continue;
+        racer.ms = elapsed + std::uint64_t{racer.penalty} * 1000;
         racer.seq = ++race.crossed;
     }
     // A finish line once its place is certain: at once, or for a penalised time once the clock reaches it.
-    for (const auto *racer : race_settle(race.racers, race.finished, (now_ - race.started) / 1000, false))
+    for (const auto *racer : race_settle(race.racers, race.finished, elapsed, false))
         log_(race_finish_line(*racer));
     // Everyone finished or left, or time is up: the rest did not finish.
     if (now_ >= race.deadline || std::none_of(race.racers.begin(), race.racers.end(),

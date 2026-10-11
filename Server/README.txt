@@ -412,6 +412,9 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
                                 Kept in memory only and dropped on a map change.
   race-checkpoint [add <x y z> <radius> | clear]   Checkpoints (at most 16) a
                                 racer must pass in order before the finish counts.
+                                Each one passed is logged, in order (several in one
+                                go where they overlap), with the race clock's time:
+                                "[race] <name> (<SteamID64>) checkpoint 2/5 in 31.4 s".
   race-arm [<x y z> <radius>|off]   Show, set (radius 1-200 m) or clear the start
                                 zone, e.g. as a countdown begins. Used by the next
                                 race-start's false-start check, then cleared (also
