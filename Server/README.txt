@@ -412,12 +412,27 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
                                 Kept in memory only and dropped on a map change.
   race-checkpoint [add <x y z> <radius> | clear]   Checkpoints (at most 16) a
                                 racer must pass in order before the finish counts.
-  race-start <SteamID64,SteamID64,...> [timeout <seconds>]   Time those players
-                                (at most 64, in the world) from now to the finish;
-                                the race ends when all finished or left, or after
-                                the timeout (default 300 s). Logged as
+  race-arm [<x y z> <radius>|off]   Show, set (radius 1-200 m) or clear the start
+                                zone, e.g. as a countdown begins. Used by the next
+                                race-start's false-start check, then cleared (also
+                                by race-stop and a map change).
+  race-start <SteamID64,SteamID64,...> [timeout <seconds>] [false-start dnf|<seconds>]
+                                Time those players (at most 64, in the world) from
+                                now to the finish; the race ends when all finished
+                                or left, or after the timeout (default 300 s, at
+                                most 3600). Logged as
                                 "[race] <name> (<SteamID64>) finished <place> in 48.3 s"
                                 and "[race] ended: 1. <name> 48.3 s, <name> DNF".
+                                false-start: with a start zone armed, a racer
+                                outside it now has a false start, logged as
+                                "[race] <name> (<SteamID64>) false start: 12.3 m from the start".
+                                dnf: they race but are not placed ("<name> DNF
+                                (false start)" in the results). <seconds> (1-60):
+                                added to their time, places go by the penalised
+                                times ("2. <name> 51.0 s (+5 s false start)"); their
+                                finish line carries the penalised time and place and
+                                is logged once that place is certain, when the race
+                                clock reaches their penalised time or the race ends.
   race-stop                     End the race now; the rest did not finish.
   activity-log on|off           Log player activity (see activity_log).
   announce-throwdowns on|off    Chat message when a throwdown is placed.

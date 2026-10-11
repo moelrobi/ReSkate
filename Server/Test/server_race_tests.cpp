@@ -1,5 +1,6 @@
 #include "Server/server_race.h"
 #include <cstdlib>
+#include <regex>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -121,5 +122,98 @@ int main() {
     check(race_results_line({Racer{.id = 1, .name = "X"}}) == "[race] ended: X DNF", "nobody finished");
     check(race_results_line({}) == "[race] ended: nobody raced", "no racers");
     check(race_results_line({finished(1, "a\nb", 1, 1)}).find('\n') == std::string::npos, "never more than one line");
+    // race-start ... false-start dnf|<seconds>
+    check(parse_race_start("1,2 false-start dnf", s).empty() && s.false_start == 0u && s.timeout == default_race_timeout,
+          "false-start dnf");
+    check(parse_race_start("1 false-start 5 timeout 120", s).empty() && s.false_start == 5u && s.timeout == 120,
+          "a penalty, then a timeout");
+    check(parse_race_start("1 timeout 120 FALSE-START DNF", s).empty() && s.false_start == 0u && s.timeout == 120,
+          "a timeout, then false-start, any case");
+    check(parse_race_start("1 false-start 60", s).empty() && s.false_start == 60u, "a 60 s penalty");
+    check(parse_race_start("1 timeout 60", s).empty() && !s.false_start, "no false-start: no check");
+    check(!parse_race_start("1 false-start 0", s).empty(), "a 0 s penalty refused");
+    check(!parse_race_start("1 false-start 61", s).empty(), "a 61 s penalty refused");
+    check(!parse_race_start("1 false-start x", s).empty(), "a word penalty refused");
+    check(!parse_race_start("1 false-start", s).empty(), "false-start alone refused");
+    check(!parse_race_start("1 false-start dnf false-start 5", s).empty(), "false-start twice refused");
+    check(!parse_race_start("1 timeout 60 timeout 90", s).empty(), "timeout twice refused");
+
+    // The start zone.
+    const RaceZone start{{0, 0, 0}, 5};
+    check(!false_start_distance(start, {1, 2, 3}), "inside the start: no false start");
+    check(!false_start_distance(start, {5, 0, 0}), "on its surface: no false start");
+    const auto away = false_start_distance(start, {3, 4, 12});
+    check(away && *away == 13.f, "outside: the distance from the centre");
+    check(!false_start_distance(start, {NAN, 99, 0}), "no position that is a number: no false start");
+
+    const auto three = [] {
+        return std::vector<Racer>{Racer{.id = 1, .name = "A"}, Racer{.id = 2, .name = "B"}, Racer{.id = 3, .name = "C"}};
+    };
+    const std::vector<std::optional<std::array<float, 3>>> at{std::array<float, 3>{1, 0, 0}, std::array<float, 3>{0, 12.34f, 0},
+                                                              std::nullopt};
+    auto field = three();
+    check(mark_false_starts(field, at, std::nullopt, 5u).empty() && !field[1].false_start, "no start zone: nobody marked");
+    check(mark_false_starts(field, at, start, std::nullopt).empty() && !field[1].false_start, "no false-start rule: nobody marked");
+    auto lines = mark_false_starts(field, at, start, 5u);
+    check(lines == std::vector<std::string>{"[race] B (2) false start: 12.3 m from the start"}, "the false start line");
+    check(!field[0].false_start && field[1].false_start && field[1].penalty == 5 && !field[1].disqualified && !field[2].false_start,
+          "only the one outside is marked; no position is not a false start");
+    field = three();
+    lines = mark_false_starts(field, at, start, 0u);
+    check(lines.size() == 1 && field[1].false_start && field[1].disqualified && !field[1].penalty, "dnf marks a disqualification");
+    check(race_false_start_line(Racer{.id = 7, .name = "x\ny"}, 2.06f) == "[race] x y (7) false start: 2.1 m from the start",
+          "a false start line is one line");
+
+    // Places with penalties: B false-started (+5 s) and crosses first at 48 s, so 53 s.
+    field = three();
+    field[1].penalty = 5;
+    field[1].false_start = true;
+    unsigned placed{};
+    std::uint64_t crossed{};
+    field[1].ms = 48000 + 5000;
+    field[1].seq = ++crossed;
+    check(race_settle(field, placed, 48000, false).empty() && !field[1].place, "a penalised time waits for the clock");
+    field[0].ms = 50000;
+    field[0].seq = ++crossed;
+    auto due = race_settle(field, placed, 50000, false);
+    check(due.size() == 1 && due[0] == &field[0] && field[0].place == 1, "a clean racer behind is placed first");
+    due = race_settle(field, placed, 53000, false);
+    check(due.size() == 1 && due[0] == &field[1] && field[1].place == 2, "the penalised one once the clock reaches 53 s");
+    const std::regex finish_format(R"(^\[race\] (.+) \((\d+)\) finished (\d+) in ([\d.]+) s$)");
+    check(race_finish_line(field[1]) == "[race] B (2) finished 2 in 53.0 s" && std::regex_match(race_finish_line(field[1]), finish_format),
+          "a penalised finish line: the penalised time and place, no suffix");
+    check(race_results_line(field) == "[race] ended: 1. A 50.0 s, 2. B 53.0 s (+5 s false start), C DNF", "results with a penalty");
+    // The race ends before the clock reaches a penalised time: placed then, in time order, ties by crossing.
+    field = three();
+    placed = 0;
+    field[0].ms = 60000;
+    field[0].seq = 2;
+    field[0].penalty = 10;
+    field[1].ms = 60000;
+    field[1].seq = 1;
+    field[1].penalty = 10;
+    field[2].ms = 55000;
+    field[2].seq = 3;
+    field[2].penalty = 5;
+    check(race_settle(field, placed, 52000, false).empty(), "nothing certain yet");
+    due = race_settle(field, placed, 52000, true);
+    check(due.size() == 3 && due[0] == &field[2] && due[1] == &field[1] && due[2] == &field[0] && field[1].place == 2,
+          "the end places the rest by time, ties by who crossed first");
+    check(race_settle(field, placed, 99000, true).empty(), "nobody is placed twice");
+    // dnf: they race but are never placed.
+    field = three();
+    placed = 0;
+    field[2].false_start = field[2].disqualified = true;
+    field[2].ms = 30000;
+    field[0].ms = 40000;
+    check(race_settle(field, placed, 99000, true).size() == 1 && !field[2].place && field[0].place == 1, "a dnf false start is not placed");
+    field[1].left = true;
+    check(race_results_line(field) == "[race] ended: 1. A 40.0 s, B DNF, C DNF (false start)", "results with a dnf false start");
+    // A penalised racer who never finishes is a DNF, still marked.
+    field = three();
+    field[0].false_start = true;
+    field[0].penalty = 5;
+    check(race_results_line(field) == "[race] ended: A DNF (false start), B DNF, C DNF", "a penalised DNF");
+    check(race_results_line(field).find('\n') == std::string::npos, "still one line");
     return 0;
 }
