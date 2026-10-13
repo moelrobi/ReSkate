@@ -26,7 +26,10 @@ namespace dingosdk::multiplayer {
 constexpr std::size_t max_skater_bones = 512, max_board_bones = 64;
 constexpr std::size_t max_packet = 24576;
 constexpr std::size_t packet_header_size = 64;
-constexpr std::uint16_t protocol_version = 49;
+constexpr std::uint16_t protocol_version = 51;
+// How long a receiver keeps typing dots after the last "still typing" notice. The sender
+// clears them after three seconds without input; this only covers a lost "stopped" packet.
+constexpr std::uint64_t typing_hold_us = 4000000;
 // A dedicated server's chat lines unless its owner says otherwise: violet (#8E5CFF) and lavender (#D9C8FF).
 inline constexpr std::uint32_t default_server_chat_badge = 0xffff5c8eU, default_server_chat_text = 0xffffc8d9U;
 constexpr std::size_t max_throwdown_message = 4096;
@@ -43,6 +46,20 @@ constexpr std::uint8_t server_vote_poll = 8, server_vote_custom = 16;
 // count for each instead of yes, no and needed.
 constexpr std::size_t max_vote_label = 120;
 constexpr std::size_t max_vote_answers = 6, max_vote_answer = 48;
+// A poll whose answers are the maps to go to next (a dedicated server's rotation vote): its
+// ServerVote::target is this, which a poll otherwise leaves 0. Games that know it show the
+// maps to pick from; older ones show the poll it is.
+inline constexpr std::uint64_t next_map_vote = 1;
+// Its answers that are not maps: any map of the pool, and (when the server offers it) staying.
+inline constexpr std::string_view next_map_random = "Random map";
+inline constexpr std::string_view next_map_stay = "Stay here";
+// One of them: the name the vote's answer has, and the Thunderstore package the map is from
+// (valid_map_package; empty for the game's own maps and when the server does not know).
+struct NextMap {
+    std::string name, package;
+    bool operator==(const NextMap &) const = default;
+};
+inline constexpr std::size_t max_next_maps = 6;
 constexpr std::uint8_t vote_running = 0, vote_passed = 1, vote_failed = 2, vote_cancelled = 3;
 struct ServerVote {
     std::uint32_t id{};
@@ -125,7 +142,14 @@ enum class PacketKind : std::uint16_t {
     permissions = 32,
     // A dedicated server's own filtered chat words (Server/server_words.h), for the chat filter
     // of each player on it: sent on joining and whenever its owner changes them.
-    words = 33
+    words = 33,
+    // The maps a dedicated server's vote for the next map will offer (Server/server_votes.cpp:
+    // the rotation's vote), sent about a minute before it so games have their pictures ready,
+    // and to whoever joins after. Empty: none are chosen (the map changed).
+    next_maps = 34,
+    // The sender's chat box changed recently (typing true) or they stopped (false).
+    // Relayed like chat. Not a chat line: receivers draw grey dots above that skater.
+    typing = 35
 };
 // Packet::party_action. Requests go from a player to whoever hosts, a dedicated server or a
 // lobby's host (party_player = the other player involved, 0 for leave/open/close); invited
@@ -202,12 +226,33 @@ inline std::string_view map_package_version(std::string_view package) noexcept {
     const auto second = first == std::string_view::npos ? first : package.find('-', first + 1);
     return second == std::string_view::npos ? std::string_view{} : package.substr(second + 1);
 }
-// The version of a map installed here, when the host's package is the same map at another
-// one: players skate the host's version, so that is fetched first. Nothing when the versions
-// agree, either names none, or they are different packages.
+// Whether version `a` is a later one than `b`: their numbers compared in turn ("1.10.0" is
+// later than "1.9.2"), a missing one counting as 0. False when either is not numbers and dots.
+inline bool map_version_newer(std::string_view a, std::string_view b) noexcept {
+    const auto next = [](std::string_view &text, std::uint64_t &value) {
+        value = 0;
+        std::size_t i = 0;
+        for (; i < text.size() && text[i] >= '0' && text[i] <= '9' && i < 9; ++i) value = value * 10 + static_cast<std::uint64_t>(text[i] - '0');
+        if (!i || (i < text.size() && text[i] != '.')) return false;
+        text.remove_prefix(i < text.size() ? i + 1 : i);
+        return true;
+    };
+    if (a.empty() || b.empty()) return false;
+    bool newer{}, decided{};
+    while (!a.empty() || !b.empty()) {
+        std::uint64_t left{}, right{};
+        if ((!a.empty() && !next(a, left)) || (!b.empty() && !next(b, right))) return false;
+        if (!decided && left != right) newer = left > right, decided = true;
+    }
+    return newer;
+}
+// The version of a map installed here, when the host's package is the same map at a later
+// one: that is fetched first, so players skate at least the host's version. Nothing when the
+// versions agree, the one here is the later (a player ahead of the host is left as they are),
+// either names none, or they are different packages.
 inline std::string_view other_map_version(std::string_view host, std::string_view mine) noexcept {
     const auto wanted = map_package_version(host), have = map_package_version(mine);
-    if (wanted.empty() || have.empty() || wanted == have) return {};
+    if (wanted.empty() || have.empty() || wanted == have || map_version_newer(have, wanted)) return {};
     const auto host_name = host.substr(0, host.size() - wanted.size()), my_name = mine.substr(0, mine.size() - have.size());
     if (host_name.size() != my_name.size()) return {};
     for (std::size_t i = 0; i < host_name.size(); ++i)
@@ -329,12 +374,15 @@ struct Packet {
     bool role_all_commands{};
     std::vector<std::string> role_commands;
     std::vector<std::string> words;           // words: a dedicated server's own filtered chat words
+    std::vector<NextMap> next_maps;           // next_maps: at most max_next_maps
     std::uint32_t role_permissions{};
     PartyAction party_action = PartyAction::leave; // party: what is asked or told
     std::uint64_t party_player{};                   // party: the other player (see PartyAction)
     // scoring: the sender's scoring fingerprint, 0 for the game's own; `text` names the mods
     // that change it (empty, or valid_admin_text).
     std::uint64_t scoring{};
+    // typing: true while the sender's chat input changed recently, false when they stopped.
+    bool typing{};
 };
 // Empty means a compatible greeting. The caller supplies its current local
 // map/session and, after the handshake, the already accepted peer epoch.

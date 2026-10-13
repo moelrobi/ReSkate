@@ -931,6 +931,15 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             }
             continue;
         }
+        // The maps the server's vote for the next map will offer, for their pictures (map_icons.h).
+        if (p.kind == PacketKind::next_maps) {
+            if (dedicated_host(s) && message.peer == s.host_id && p.source == s.host_id) {
+                std::vector<NextMapWanted> maps;
+                for (const auto &map : p.next_maps) maps.push_back({clean_chat_text(map.name), map.package});
+                set_next_maps(std::move(maps));
+            }
+            continue;
+        }
         // The server's own filtered chat words: filtered here too while on it (reset_session clears them).
         if (p.kind == PacketKind::words) {
             if (dedicated_host(s) && message.peer == s.host_id && p.source == s.host_id) {
@@ -1017,6 +1026,26 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             }
             if (owes_proof(s, *sender)) relayed_chat(s, *sender, p, now);
             else add_chat(s, sender->member.id, server ? std::string("Server") : chat_name(s, *sender), p.text);
+            if (s.mode == Mode::host) broadcast(s, p, true, false, now, p.source);
+            continue;
+        }
+        // Grey dots above the sender. Not a chat line. "On" is held to a few a second so a
+        // modified client cannot flood the relay, and "off" only clears dots that are up, so
+        // it cannot outpace "on".
+        if (p.kind == PacketKind::typing) {
+            auto *sender = find_peer(s, p.source);
+            if (direct_link || !sender || !sender->handshaken) continue;
+            if (!routed_source(p, sender->member, message.peer, s.mode == Mode::host, s.host_id))
+                continue;
+            if (p.typing) {
+                if (sender->typing_notice && now < sender->typing_notice + 200000) continue;
+                sender->typing_notice = now;
+                sender->typing_until = now + typing_hold_us;
+            } else {
+                if (!sender->typing_until) continue;
+                sender->typing_until = 0;
+            }
+            sender->last_packet = now;
             if (s.mode == Mode::host) broadcast(s, p, true, false, now, p.source);
             continue;
         }

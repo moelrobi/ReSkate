@@ -404,6 +404,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         throw std::invalid_argument("Invalid effects packet");
     if (p.kind == PacketKind::chat && (!p.source || !valid_chat_text(p.text)))
         throw std::invalid_argument("Invalid chat message");
+    if (p.kind == PacketKind::typing && !p.source)
+        throw std::invalid_argument("Invalid typing notice");
     if (p.kind == PacketKind::admin && (!p.source || !valid_admin_text(p.text)))
         throw std::invalid_argument("Invalid admin message");
     if (p.kind == PacketKind::throwdown && (!p.source || p.throwdown.empty() || p.throwdown.size() > max_throwdown_message))
@@ -439,6 +441,12 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         (!p.source || p.words.size() > max_server_words ||
          std::any_of(p.words.begin(), p.words.end(), [](const auto &word) { return !valid_server_word(word); })))
         throw std::invalid_argument("Invalid word list");
+    if (p.kind == PacketKind::next_maps &&
+        (!p.source || p.next_maps.size() > max_next_maps ||
+         std::any_of(p.next_maps.begin(), p.next_maps.end(), [](const auto &map) {
+             return map.name.empty() || map.name.size() > max_vote_answer || !valid_chat_text(map.name) || !valid_map_package(map.package);
+         })))
+        throw std::invalid_argument("Invalid next maps");
     if (p.kind == PacketKind::hello && !p.text.empty() && !valid_member_name(p.text))
         throw std::invalid_argument("Invalid player name");
     if (p.kind == PacketKind::roster && !valid_voice_range(p.voice_range))
@@ -468,7 +476,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         p.kind != PacketKind::admin && p.kind != PacketKind::bans && p.kind != PacketKind::maps &&
         p.kind != PacketKind::throwdown && p.kind != PacketKind::teleport && p.kind != PacketKind::physics_tuning &&
         p.kind != PacketKind::party && p.kind != PacketKind::scoring && p.kind != PacketKind::physics_extras &&
-        p.kind != PacketKind::effects && p.kind != PacketKind::permissions && p.kind != PacketKind::words)
+        p.kind != PacketKind::effects && p.kind != PacketKind::permissions && p.kind != PacketKind::words &&
+        p.kind != PacketKind::next_maps && p.kind != PacketKind::typing)
         throw std::invalid_argument("Unknown packet kind");
     const auto payload = greeting ? 72
                          : p.kind == PacketKind::away
@@ -582,6 +591,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         w.integer(p.text.size(), 2);
         w.bytes.insert(w.bytes.end(), p.text.begin(), p.text.end());
     }
+    if (p.kind == PacketKind::typing)
+        w.integer(p.typing ? 1 : 0, 1);
     if (p.kind == PacketKind::throwdown) {
         w.integer(p.throwdown.size(), 2);
         w.bytes.insert(w.bytes.end(), p.throwdown.begin(), p.throwdown.end());
@@ -625,6 +636,15 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         for (const auto &command : p.role_commands) {
             w.integer(command.size(), 1);
             w.bytes.insert(w.bytes.end(), command.begin(), command.end());
+        }
+    }
+    if (p.kind == PacketKind::next_maps) {
+        w.integer(p.next_maps.size(), 1);
+        for (const auto &map : p.next_maps) {
+            w.integer(map.name.size(), 1);
+            w.bytes.insert(w.bytes.end(), map.name.begin(), map.name.end());
+            w.integer(map.package.size(), 1);
+            w.bytes.insert(w.bytes.end(), map.package.begin(), map.package.end());
         }
     }
     if (p.kind == PacketKind::words) {
@@ -941,6 +961,10 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
             p.text.assign(reinterpret_cast<const char *>(bytes.data() + r.at), static_cast<std::size_t>(length));
             r.at = bytes.size();
             if (!valid_chat_text(p.text)) return {};
+        } else if (p.kind == PacketKind::typing) {
+            const auto on = r.integer(1);
+            if (!p.source || on > 1) return {};
+            p.typing = on != 0;
         } else if (p.kind == PacketKind::throwdown) {
             const auto length = r.integer(2);
             if (!p.source || !length || length > max_throwdown_message || length != bytes.size() - r.at)
@@ -1016,6 +1040,23 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
                 std::string command;
                 if (!text(max_role_command, command) || !valid_role_word(command, max_role_command)) return {};
                 p.role_commands.push_back(std::move(command));
+            }
+        } else if (p.kind == PacketKind::next_maps) {
+            const auto count = r.integer(1);
+            if (!p.source || count > max_next_maps) return {};
+            const auto text = [&](std::size_t most, std::string &out) {
+                const auto length = r.integer(1);
+                if (length > most || length > bytes.size() - r.at) return false;
+                out.assign(reinterpret_cast<const char *>(bytes.data() + r.at), static_cast<std::size_t>(length));
+                r.at += static_cast<std::size_t>(length);
+                return true;
+            };
+            for (std::uint64_t i = 0; i < count; ++i) {
+                NextMap map;
+                if (!text(max_vote_answer, map.name) || map.name.empty() || !valid_chat_text(map.name) ||
+                    !text(max_map_package, map.package) || !valid_map_package(map.package))
+                    return {};
+                p.next_maps.push_back(std::move(map));
             }
         } else if (p.kind == PacketKind::words) {
             const auto count = r.integer(2);

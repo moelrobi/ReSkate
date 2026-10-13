@@ -120,6 +120,11 @@ void Host::send_words(Guest &guest) {
     p.words = filtered_words_;
     if (send_packet(guest, p, true, false)) guest.words_sent = words_revision_;
 }
+void Host::send_next_maps(Guest &guest) {
+    auto p = packet(PacketKind::next_maps, now_);
+    p.next_maps = next_maps_;
+    if (send_packet(guest, p, true, false)) guest.next_maps_sent = next_maps_revision_;
+}
 void Host::roles_changed() {
     ++roles_revision_;
     ++bans_revision_;
@@ -913,6 +918,9 @@ void Host::change_map(std::string_view map) {
     map_ = map_hash(map_destination(config_.map));
     map_since_ = now_;
     rotation_warned_ = false;
+    rotation_told_ = 0;
+    rotation_voted_ = false;
+    if (!next_maps_.empty()) next_maps_.clear(), ++next_maps_revision_;
     travel_started_ = now_;
     last_world_state_ = 0;
     send_world_state();
@@ -1255,6 +1263,24 @@ void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes, std:
             return;
         }
         log_("[chat] " + guest_name(*link) + ": " + p.text);
+        broadcast(p, true, false, p.source);
+        return;
+    }
+    // Grey dots above the sender. Not a chat line, and not logged. A player who may not
+    // chat sends none. "On" is held to a few a second, and "off" is passed on only after an
+    // "on", so neither can flood the relay.
+    if (p.kind == PacketKind::typing) {
+        if (!routed_source(p, link->member, peer, true, id_) || !may(peer, multiplayer::role_chat)) return;
+        if (p.typing) {
+            if (link->typing_notice && now_ < link->typing_notice + 200000) return;
+            link->typing_notice = now_;
+            link->typing = true;
+        } else {
+            if (!link->typing) return;
+            link->typing = false;
+        }
+        link->last_packet = now_;
+        active(*link);
         broadcast(p, true, false, p.source);
         return;
     }
@@ -1716,9 +1742,16 @@ void Host::tick(std::uint64_t now) {
         drop(id, "Disconnected.", how);
     }
     for (const auto &link : links) {
-        if (kicked_.contains(link.id)) {
-            transport_.disconnect(link.id, "You were kicked from this server.");
-            continue;
+        if (const auto kicked = kicked_.find(link.id); kicked != kicked_.end()) {
+            if (!kicked->second || now_ < kicked->second) {
+                const auto reason = kicked->second
+                    ? "You were kicked from this server. You can join again in " +
+                          std::to_string((kicked->second - now_) / 60000000 + 1) + " min."
+                    : std::string("You were kicked from this server.");
+                transport_.disconnect(link.id, reason.c_str());
+                continue;
+            }
+            kicked_.erase(kicked); // their time is up
         }
         if (is_banned(link.id)) {
             transport_.disconnect(link.id, "You are banned from this server.");
@@ -1840,6 +1873,7 @@ void Host::tick(std::uint64_t now) {
             if (!guest->maps_sent && (can(id, "map") || config_.votes.map.enabled)) send_maps(*guest);
             if (guest->permissions_sent != roles_revision_) send_permissions(*guest);
             if (guest->words_sent != words_revision_) send_words(*guest);
+            if (guest->next_maps_sent != next_maps_revision_) send_next_maps(*guest);
         }
     const bool loading = std::any_of(guests_.begin(), guests_.end(),
                                      [](const auto &g) { return g.second->handshaken && !g.second->world_ready; });

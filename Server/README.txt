@@ -142,6 +142,38 @@ rotation_minutes   Minutes on each map before the server moves to the next
                    one in pool (default 0: off). Players get a minute's
                    warning; the clock waits while nobody is on, and starts
                    over whenever the map changes (by a vote or an admin too).
+rotation_vote      When a map's time is up, players vote for the next one
+                   (default false): three maps of the pool picked at random,
+                   "Random map", and "Stay here". The most votes wins, a tie
+                   is drawn, and with no vote at all it is the pool's next
+                   map. The maps are chosen a minute before, so players'
+                   games have their pictures ready.
+rotation_vote_seconds
+                   How long that vote runs, 10-120 (default 30). It ends
+                   sooner once everyone has voted.
+rotation_extend_minutes
+                   What "Stay here" adds to the map's time, 1-240 (default
+                   15), or 0 to leave that answer out. Players can ask for
+                   the same at any time with "/vote extend" (votes.extend_map),
+                   and "rotation extend [minutes]" adds time at once.
+rotation_announce  Tell players on a card when the map has 10, 5 and 1
+                   minutes left (default true).
+latest_versions    Keep this server's custom maps at Thunderstore's newest
+                   version (default false). A map mod in Mods whose folder is a
+                   Thunderstore package (Owner-Name) is looked up when the
+                   server starts and every latest_check_minutes; when a newer
+                   version is out, that version is written into the folder's
+                   manifest.json and the maps are read again. Nothing is
+                   downloaded: the server only needs to know the version, and
+                   players, who are sent to the server's version of a map,
+                   fetch it as they join. A player who already has a later
+                   version than the server keeps it. The map being played is
+                   left until nobody is on it. A folder that is not a
+                   Thunderstore package is never touched.
+                   The level list is not changed: when a new version adds,
+                   removes or renames levels, copy its reskate-levels.json in.
+latest_check_minutes
+                   How often Thunderstore is asked, 5-1440 (default 60).
 parks              Layout for each park lot, e.g. "skatepark_01", or "empty".
 world_layer_sync   Force the "layers" below on every player.
 layers             World layer key -> "on" / "off".
@@ -175,6 +207,13 @@ afk_kick_minutes   Remove a player who has been away this many minutes, 1-1440
                    in chat or changing their objects. They are warned in chat
                    a minute before and can join again at once. Admins are
                    never removed for it. Console: afk-kick <minutes>|off.
+kick_minutes       How long a kicked player is kept out, by an admin's kick or
+                   by a vote: 1-1440 minutes (default 0: until the server
+                   restarts). They are told how long when they are kicked and
+                   when they try to join. A kick keeps the time it was given;
+                   changing this is for later kicks. A ban is still for good.
+                   One kick can be given its own time: kick <player> 30.
+                   Console: kick-time <minutes>|restart.
 word_warnings      The ReSkate team keeps a list of words that are not allowed
                    in chat at all (read from api.reskate.dev with the global
                    bans). A message with one is never passed on, whatever
@@ -326,6 +365,11 @@ votes              Player votes, each off until turned on:
                      "kick": {"enabled": true, "percent": 60}  /vote kick <player>
                      "time_of_day": {"enabled": true, "percent": 50}  /vote tod <time>
                                                    (needs world_layer_sync)
+                     "extend_map": {"enabled": true, "percent": 50}  /vote extend
+                                                   (on by default; needs
+                                                   maps.rotation_minutes: the
+                                                   map in play gets
+                                                   rotation_extend_minutes more)
                    "percent" is the share of the votes cast that yes needs to
                    pass it: players who do not vote count for neither side. A
                    vote runs its time and is decided then, or sooner once the
@@ -448,7 +492,7 @@ A role is:
   name         1 to 24 of a-z, 0-9, - and _.
   tag          The word shown before the player's name in the game, up to 16
                characters ("" for none). Not one the game uses itself (Server,
-               Host, Friend, Dev, Staff...).
+               Host, Friend, Dev, ReSkate Admin...).
   color        The tag's colour, like "#FF74C6".
   rank         0 to 1000. Nobody kicks, bans or changes the role of a player
                whose rank is theirs or higher, or gives out a role whose rank
@@ -512,16 +556,29 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
   msg-party <player> <text>     Message everyone in that player's party ("[DM from <you> to party]").
   msg-admins <text>             Message every admin who is online ("[DM from <you> to admins]").
                                 Players can whisper each other with /w <player> <text> in chat.
-  kick <player>                 Until the server restarts. Name start or SteamID64.
+  kick <player> [minutes]       For that many minutes (1-1440), or "restart" for until
+                                the server restarts; with neither, for as long as
+                                kick-time says. Name start or SteamID64.
+  kick-time <minutes>|restart   How long a kicked player (by an admin or a vote) is kept
+                                out: 1-1440 minutes, or until the server restarts.
                                 Nobody kicks or bans a player of their rank or above; the console can.
   ban <player or id> [name]     For good.   unban <id>   bans
   map <name>                    e.g. map San Vansterdam, map grom, map bbcity
   maps                          The maps this server knows.
   maps reload                   Read the Mods folder again: a map mod copied in
                                 while the server runs can be switched to at once.
+  maps update                   Ask Thunderstore now for the newest version of
+                                each of this server's maps and take it (see
+                                maps.latest_versions); the log says what it did.
+  maps latest on|off            Turn maps.latest_versions on or off.
+  maps latest every <minutes>   How often Thunderstore is asked.
   map-pool [add|remove <map>|clear]   The maps players vote between and the
                                 rotation uses (see maps.pool).
   rotation [<minutes>|off]      Change the map on a timer (see maps.rotation_minutes).
+  rotation vote on|off          Players vote for the next map when the time is up.
+  rotation stay <minutes>|off   What "Stay here" in that vote adds (off: not offered).
+  rotation announce on|off      Tell players at 10, 5 and 1 minutes left.
+  rotation extend [minutes]     Give the map in play more time now.
   name <text>   password <text|off>   welcome <text|off>   listed on|off
   voice on|off   voice-range <m>
   distances <full> <half> <half-return> <low>

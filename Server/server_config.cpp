@@ -86,6 +86,12 @@ Layout layout(const ServerConfig &c) {
     for (const auto &map : c.map_pool) pool.push_back(map);
     maps.set("pool", std::move(pool));
     maps.set("rotation_minutes", c.map_rotation);
+    maps.set("rotation_vote", c.rotation_vote);
+    maps.set("rotation_vote_seconds", c.rotation_vote_seconds);
+    maps.set("rotation_extend_minutes", c.rotation_extend);
+    maps.set("rotation_announce", c.rotation_announce);
+    maps.set("latest_versions", c.latest_versions);
+    maps.set("latest_check_minutes", c.latest_check_minutes);
     auto parks = Json::object();
     for (unsigned lot = 0; lot < park_lots.size(); ++lot) parks[park_lots[lot].key] = c.parks[lot];
     maps.set("parks", std::move(parks));
@@ -115,6 +121,7 @@ Layout layout(const ServerConfig &c) {
     players.set("allow_parties", c.parties);
     players.set("party_size", c.party_size);
     players.set("afk_kick_minutes", c.afk_kick);
+    players.set("kick_minutes", c.kick_minutes);
     players.set("word_warnings", c.word_warnings);
     players.set("use_global_word_filter", c.global_words);
     players.set("allow_voice_chat", c.voice_chat);
@@ -162,6 +169,7 @@ Layout layout(const ServerConfig &c) {
     vote("map", c.votes.map);
     vote("kick", c.votes.kick);
     vote("time_of_day", c.votes.time);
+    vote("extend_map", c.votes.extend);
     votes.set("seconds", c.votes.seconds);
     votes.set("cooldown_seconds", c.votes.cooldown);
     votes.set("starter_votes_yes", c.votes.starter_votes_yes);
@@ -327,6 +335,12 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
         for (const auto &map : *pool)
             if (map.is_string() && !map.string().empty()) c.map_pool.push_back(map.string());
     c.map_rotation = std::min(get("maps", "rotation_minutes", c.map_rotation, {"map_rotation_minutes"}), max_map_rotation);
+    c.rotation_vote = get("maps", "rotation_vote", c.rotation_vote);
+    c.rotation_vote_seconds = std::clamp(get("maps", "rotation_vote_seconds", c.rotation_vote_seconds), 10U, 120U);
+    c.rotation_extend = std::min(get("maps", "rotation_extend_minutes", c.rotation_extend), 240U);
+    c.rotation_announce = get("maps", "rotation_announce", c.rotation_announce);
+    c.latest_versions = get("maps", "latest_versions", c.latest_versions);
+    c.latest_check_minutes = std::clamp(get("maps", "latest_check_minutes", c.latest_check_minutes), 5U, 1440U);
     if (const auto *parks = find("maps", "parks"); parks && parks->is_object())
         for (unsigned lot = 0; lot < park_lots.size(); ++lot) c.parks[lot] = parks->value(park_lots[lot].key, c.parks[lot]);
     c.world_layer_sync = get("maps", "world_layer_sync", c.world_layer_sync);
@@ -352,6 +366,7 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
     c.parties = get("players", "allow_parties", c.parties, {"parties"});
     c.party_size = std::clamp(get("players", "party_size", c.party_size), 2U, 8U);
     c.afk_kick = get("players", "afk_kick_minutes", c.afk_kick);
+    c.kick_minutes = get("players", "kick_minutes", c.kick_minutes);
     c.word_warnings = get("players", "word_warnings", c.word_warnings);
     c.global_words = get("players", "use_global_word_filter", c.global_words);
     c.voice_chat = get("players", "allow_voice_chat", c.voice_chat, {"voice_chat"});
@@ -415,6 +430,7 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
     read_vote("map", c.votes.map);
     read_vote("kick", c.votes.kick);
     read_vote("time_of_day", c.votes.time);
+    read_vote("extend_map", c.votes.extend);
     for (const char *key : {"seconds", "cooldown_seconds", "starter_votes_yes", "polls", "poll_seconds", "custom"})
         if (!votes.contains(key)) missing.push_back(std::string("votes.") + key);
     c.votes.seconds = std::clamp(votes.value("seconds", c.votes.seconds), 10U, 300U);
@@ -556,7 +572,7 @@ std::string roles_error(const Roles &roles) {
             if (roles.list[j].name == role.name) return where + "listed twice.";
         if (!role.tag.empty() && !valid_role_tag(role.tag)) return where + "its tag is at most 16 bytes of plain text.";
         // What the game itself calls the server, a lobby's host, friends and the ReSkate team.
-        for (const std::string_view taken : {"server", "reskate", "dev", "developer", "contentcreator", "centrix", "staff", "homie", "host", "friend"})
+        for (const std::string_view taken : {"server", "reskate", "reskateadmin", "dev", "developer", "contentcreator", "centrix", "staff", "homie", "host", "friend"})
             if (plain(role.tag) == taken) return where + "the tag \"" + role.tag + "\" is one the game uses itself.";
         if (!parse_colour(role.color)) return where + "color must be a colour like #FF74C6.";
         if (role.rank < 0 || role.rank > 1000) return where + "rank is 0 to 1000.";
@@ -707,7 +723,7 @@ std::optional<std::uint32_t> parse_colour(std::string_view text) noexcept {
 }
 bool custom_vote_name_free(std::string_view name) noexcept {
     // What "/vote <word>" already means.
-    for (const std::string_view taken : {"map", "kick", "tod", "time", "yes", "y", "no", "n", "poll", "list"})
+    for (const std::string_view taken : {"map", "kick", "tod", "time", "extend", "yes", "y", "no", "n", "poll", "list"})
         if (name == taken) return false;
     // A number is an answer to a poll ("/vote 2").
     return !std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; });
@@ -744,7 +760,7 @@ bool custom_command_name_free(std::string_view name) noexcept {
     // The chat's own commands, then the server commands admins type as /<command>.
     for (const std::string_view taken :
          {"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
-          "activity-log", "admin", "admins", "afk-kick", "role", "roles", "announce", "announce-throwdowns", "announce-to", "announcements",
+          "activity-log", "admin", "admins", "afk-kick", "kick-time", "role", "roles", "announce", "announce-throwdowns", "announce-to", "announcements",
           "ban", "bans", "board-check", "bone-scale", "boosts", "boosts-allow", "chat-color", "chat-colour", "clear-objects", "crowd",
           "distances", "effects", "kick", "layer", "layer-sync", "layers", "listed", "map", "map-pool", "maps", "msg",
           "msg-admins", "msg-party", "name", "net", "nobail", "nobail-allow", "noclip", "noclip-allow", "object-limit",
@@ -814,6 +830,7 @@ std::string config_error(const ServerConfig &c) {
     using namespace multiplayer;
     if (!parse_colour(c.chat_color)) return "chat_color must be a colour like #8E5CFF.";
     if (c.afk_kick > 1440) return "afk_kick_minutes must be 0 (never) to 1440.";
+    if (c.kick_minutes > 1440) return "kick_minutes must be 0 (until the server restarts) to 1440.";
     if (c.word_warnings > 10) return "word_warnings must be 0 (words are not checked) to 10.";
     if (!parse_colour(c.chat_text_color)) return "chat_text_color must be a colour like #D9C8FF.";
     if (!valid_server_name(c.name)) return std::string("name must be ") + server_name_rule + ".";
