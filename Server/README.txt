@@ -569,7 +569,7 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 stand in a ring round the target. Logged as
                                 "[teleport] <n> player(s) to <target> by <who>".
   hns-start <seekers> <hiders> at <x y z|player> [hide <s>] [seek <s>] [reveal <m>] [find <m>] [hold <m>]
-            [area <m>] [out <s>]
+            [area <m>] [out <s>] [ping <s>]
                                 Hide and seek. <seekers> and <hiders> are
                                 SteamID64s joined by commas (at least 1 seeker
                                 and 2 hiders, at most 64 in all; ones not on or
@@ -593,6 +593,11 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 and one outside for out seconds in a row (10-600,
                                 default 60; 0: never) is out of the round. Back
                                 in counts 5 m inside the edge.
+                                Past 85 % of the area a hider is told once
+                                (again after coming back under 75 %). Every ping
+                                seconds of seeking (15-600, default 45; 0: never)
+                                every seeker sees every hider for 2 s, announced
+                                5 s before.
                                 Hiders never see other hiders. Players not in
                                 the round see everyone. A new
                                 map ends the round. Logged as "[hns] started:
@@ -601,7 +606,9 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 (<id>) left", "[hns] <name> (<id>) seeks now:
                                 the seekers left", "[hns] <name> (<id>) left the
                                 area", "... is back in the area", "... is out:
-                                outside the area", "[hns] ended: <names> win" or
+                                outside the area", "... near the edge: 172 m of
+                                200 m", "[hns] ping in 5 s", "[hns] ping",
+                                "[hns] ended: <names> win" or
                                 "[hns] ended: nobody wins".
   hns-found <player>            The hider is found (seek phase): "[hns] <name>
                                 (<id>) found by <who>".

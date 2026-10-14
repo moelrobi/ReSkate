@@ -313,6 +313,7 @@ class Host {
         std::map<std::uint64_t, std::string> names;
         HnsFinds finds;
         HnsArea area; // hiders outside the play area
+        HnsPing ping; // the seekers' look at every hider, every ping_s of seeking
     };
     HnsRound hns_;
     std::string hns_command(std::string_view name, std::string_view argument, std::uint64_t admin);

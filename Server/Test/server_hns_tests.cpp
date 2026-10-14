@@ -63,6 +63,13 @@ int main() {
     check(parse_hns_start("1 2,3 at 0 0 0 area 20 out 10", s).empty(), "the lower limits of area and out accepted");
     check(parse_hns_start("1 2,3 at 0 0 0 area 2000 out 600", s).empty(), "the upper limits of area and out accepted");
     check(parse_hns_start("1 2,3 at 0 0 0 out 0", s).empty() && s.settings.out_s == 0, "out 0: nobody is put out");
+    check(parse_hns_start("1 2,3 at 0 0 0", s).empty() && s.settings.ping_s == 45, "a ping every 45 s by default");
+    check(parse_hns_start("1 2,3 at 0 0 0 ping 60", s).empty() && s.settings.ping_s == 60, "ping read");
+    check(parse_hns_start("1 2,3 at 0 0 0 ping 0", s).empty() && s.settings.ping_s == 0, "ping 0: no pings");
+    check(parse_hns_start("1 2,3 at 0 0 0 ping 15", s).empty() && parse_hns_start("1 2,3 at 0 0 0 ping 600", s).empty(),
+          "the limits of ping accepted");
+    check(refused("1 2,3 at 0 0 0 ping 10"), "ping 10 refused");
+    check(refused("1 2,3 at 0 0 0 ping 601"), "ping 601 refused");
     check(refused("1 2,3 at 0 0 0 area 19"), "area 19 refused");
     check(refused("1 2,3 at 0 0 0 area 2001"), "area 2001 refused");
     check(refused("1 2,3 at 0 0 0 out 5"), "out 5 refused");
@@ -114,6 +121,12 @@ int main() {
     check(hns_outside(true, {97, 0, 0}, spot, 100.f), "outside, back at 97 m: still outside");
     check(!hns_outside(true, {94, 0, 0}, spot, 100.f), "outside, back at 94 m: inside");
 
+    // Near the edge: past 85 % of the area, again only after coming back under 75 %.
+    check(!hns_near_edge(false, {84, 0, 0}, spot, 100.f), "84 m of 100: not near the edge");
+    check(hns_near_edge(false, {0, 0, 86}, spot, 100.f), "86 m of 100: near the edge");
+    check(hns_near_edge(true, {76, 0, 0}, spot, 100.f), "near, back at 76 m: still near");
+    check(!hns_near_edge(true, {74, 0, 0}, spot, 100.f), "near, back at 74 m: no longer");
+
     // Outside for out_s in a row: out of the round. Coming back in starts it over.
     using AE = HnsAreaEvent;
     using Events = std::vector<std::pair<std::uint64_t, AE>>;
@@ -132,6 +145,20 @@ int main() {
     HnsArea never;
     never.step(0, out, spot, 100.f, 0);
     check(never.step(3600 * sec, out, spot, 100.f, 0).empty(), "out 0: an hour outside and still in the round");
+    // The edge hint: once on the way out, not again before coming back under 75 %; none for a hider
+    // who goes straight from inside to outside (they hear they left).
+    HnsArea edge;
+    const std::vector<HnsPos> at70{{2, {70, 0, 0}}}, at90{{2, {90, 0, 0}}}, at80{{2, {80, 0, 0}}};
+    check(edge.step(0, at70, spot, 100.f, 60 * sec).empty(), "70 m: nothing");
+    check(edge.step(sec, at90, spot, 100.f, 60 * sec) == Events{{2, AE::edge}}, "90 m: near the edge");
+    check(edge.step(2 * sec, at80, spot, 100.f, 60 * sec).empty(), "80 m: still near, no second hint");
+    check(edge.step(3 * sec, at90, spot, 100.f, 60 * sec).empty(), "90 m again without going back: no hint");
+    check(edge.step(4 * sec, at70, spot, 100.f, 60 * sec).empty(), "back to 70 m");
+    check(edge.step(5 * sec, at90, spot, 100.f, 60 * sec) == Events{{2, AE::edge}}, "90 m after 70 m: a hint again");
+    HnsArea jump;
+    check(jump.step(0, at70, spot, 100.f, 60 * sec).empty() &&
+              jump.step(sec, out, spot, 100.f, 60 * sec) == Events{{2, AE::left}},
+          "70 m to 150 m in one step: left, no edge hint");
     HnsArea quiet;
     quiet.step(0, out, spot, 100.f, 60 * sec);
     check(quiet.step(61 * sec, {}, spot, 100.f, 60 * sec).empty(), "no fresh position: no verdict");
@@ -158,6 +185,28 @@ int main() {
     const std::vector<HnsPos> above{{2, {0, 2.5f, 2.5f}}};
     height.step(0, seeker, above, 3.f);
     check(height.step(second, seeker, above, 3.f).empty(), "3.5 m away diagonally is not within 3 m");
+
+    // The ping: every ping_us of seeking, "soon" 5 s before; 0 never.
+    using PE = HnsPingEvent;
+    HnsPing ping;
+    const std::uint64_t start = 100 * sec, every = 45 * sec;
+    check(ping.step(start, start, every) == PE::none, "no ping as the seek phase begins");
+    check(ping.step(start + 39 * sec, start, every) == PE::none, "39 s: nothing");
+    check(ping.step(start + 40 * sec, start, every) == PE::soon, "40 s: a ping in 5 s");
+    check(ping.step(start + 41 * sec, start, every) == PE::none, "one warning");
+    check(ping.step(start + 45 * sec, start, every) == PE::ping, "45 s: ping");
+    check(ping.showing(start + 45 * sec + hns_ping_us - 1), "shown for hns_ping_us");
+    check(!ping.showing(start + 45 * sec + hns_ping_us), "and then not");
+    check(ping.step(start + 46 * sec, start, every) == PE::none, "one ping");
+    check(ping.step(start + 85 * sec, start, every) == PE::soon && ping.step(start + 90 * sec, start, every) == PE::ping,
+          "the next one 45 s later");
+    HnsPing late;
+    check(late.step(start + 47 * sec, start, every) == PE::ping, "a tick that skips the warning still pings");
+    HnsPing off;
+    check(off.step(start + 45 * sec, start, 0) == PE::none && !off.showing(start + 45 * sec), "ping 0: never");
+    // A ping shows the hiders to the seekers, at any distance; still not to the other hiders.
+    check(!hns_hidden(P::seek, R::hider, R::seeker, far, 25.f, false, true), "pinged: seen from afar");
+    check(hns_hidden(P::seek, R::hider, R::hider, far, 25.f, false, true), "pinged: still not to another hider");
 
     // How a round ends.
     using E = HnsEnd;

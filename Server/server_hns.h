@@ -26,6 +26,7 @@ struct HnsSettings {
     float reveal = 25.f, find = 3.f, hold = 15.f;
     float area = 100.f; // the play area: a circle this wide around the spot
     unsigned out_s = 60; // outside the area this long in a row: out of the round (0: never)
+    unsigned ping_s = 45; // every this long of seeking, the seekers see every hider for a moment (0: never)
 };
 constexpr std::uint64_t hns_dwell_us = 1000000; // within `find` this long is a find
 constexpr std::uint64_t hns_fresh_us = 1000000; // a position older than this is not trusted
@@ -39,7 +40,7 @@ struct HnsStart {
 };
 constexpr std::string_view hns_start_usage =
     "hns-start <SteamID64,...> <SteamID64,...> at <x y z|player> [hide <s>] [seek <s>] [reveal <m>] [find <m>] [hold <m>] "
-    "[area <m>] [out <s>]";
+    "[area <m>] [out <s>] [ping <s>]";
 
 namespace hns_detail {
 inline std::optional<float> decimal(std::string_view word) {
@@ -109,15 +110,18 @@ inline std::string parse_hns_start(std::string_view argument, HnsStart &out) {
         settings = remaining;
         const auto key = lower(name);
         if (value.empty()) return "\"" + std::string(name) + "\" needs a value.";
-        if (key == "hide" || key == "seek" || key == "out") {
+        if (key == "hide" || key == "seek" || key == "out" || key == "ping") {
             const auto seconds = number(value);
-            const unsigned least = key == "hide" ? 10 : key == "seek" ? 30 : 10;
-            const unsigned most = key == "hide" ? 600 : key == "seek" ? 3600 : 600;
-            if (!seconds || ((*seconds < least || *seconds > most) && !(key == "out" && *seconds == 0)))
+            const bool never = key == "out" || key == "ping"; // 0 switches them off
+            const unsigned least = key == "hide" ? 10 : key == "seek" ? 30 : key == "out" ? 10 : 15;
+            const unsigned most = key == "seek" ? 3600 : 600;
+            if (!seconds || ((*seconds < least || *seconds > most) && !(never && *seconds == 0)))
                 return key + " is " + std::to_string(least) + " to " + std::to_string(most) + " seconds" +
-                       (key == "out" ? " (0: never)." : ".");
-            (key == "hide" ? out.settings.hide_s : key == "seek" ? out.settings.seek_s : out.settings.out_s) =
-                static_cast<unsigned>(*seconds);
+                       (never ? " (0: never)." : ".");
+            (key == "hide"   ? out.settings.hide_s
+             : key == "seek" ? out.settings.seek_s
+             : key == "out"  ? out.settings.out_s
+                             : out.settings.ping_s) = static_cast<unsigned>(*seconds);
             continue;
         }
         const float least = key == "reveal" ? 5.f : key == "find" ? 1.f : key == "area" ? 20.f : 5.f;
@@ -141,14 +145,15 @@ inline std::string parse_hns_start(std::string_view argument, HnsStart &out) {
 // Whether a packet of a skater whose role is `source` must not reach a player whose role is
 // `recipient`: a hider never reaches another hider, and a seeker only while seeking, within reveal.
 // distance2: the square of the distance between them, none when either position is stale. outside:
-// the hider is outside the play area, where, seeking, every seeker sees them.
+// the hider is outside the play area, where, seeking, every seeker sees them; pinged: a ping is on,
+// and seeking, every seeker sees every hider.
 inline bool hns_hidden(HnsPhase phase, HnsRole source, HnsRole recipient, std::optional<float> distance2, float reveal,
-                       bool outside = false) {
+                       bool outside = false, bool pinged = false) {
     if (phase == HnsPhase::off || source != HnsRole::hider) return false;
     if (recipient == HnsRole::hider) return true; // hiders never see each other: no following to the good spots
     if (recipient != HnsRole::seeker) return false;
     if (phase == HnsPhase::hide) return true;
-    if (outside) return false;
+    if (outside || pinged) return false;
     return !distance2 || *distance2 > reveal * reveal;
 }
 
@@ -158,6 +163,12 @@ constexpr float hns_area_margin = 5.f; // back inside only this far within the e
 inline bool hns_outside(bool was, const std::array<float, 3> &position, const std::array<float, 3> &at, float area) {
     const float dx = position[0] - at[0], dz = position[2] - at[2];
     const float edge = was ? area - hns_area_margin : area;
+    return dx * dx + dz * dz > edge * edge;
+}
+// Whether a hider is near the edge: past 85 % of the area, or for one who `was`, past 75 %.
+inline bool hns_near_edge(bool was, const std::array<float, 3> &position, const std::array<float, 3> &at, float area) {
+    const float dx = position[0] - at[0], dz = position[2] - at[2];
+    const float edge = area * (was ? .75f : .85f);
     return dx * dx + dz * dz > edge * edge;
 }
 
@@ -197,12 +208,13 @@ struct HnsFinds {
     }
 };
 
-enum class HnsAreaEvent { left, back, out };
+enum class HnsAreaEvent { left, back, out, edge };
 struct HnsArea {
     std::map<std::uint64_t, std::uint64_t> since; // hider: outside since
+    std::set<std::uint64_t> near;                  // hiders told they are near the edge
     bool outside(std::uint64_t id) const { return since.contains(id); }
-    // Who left the area, came back, or has been outside for out_us in a row (0: never out), from the
-    // hiders' fresh positions; one without a fresh position keeps where they were.
+    // Who came near the edge, left the area, came back, or has been outside for out_us in a row (0:
+    // never out), from the hiders' fresh positions; one without a fresh position keeps where they were.
     std::vector<std::pair<std::uint64_t, HnsAreaEvent>> step(std::uint64_t now, const std::vector<HnsPos> &hiders,
                                                              const std::array<float, 3> &at, float area,
                                                              std::uint64_t out_us) {
@@ -211,8 +223,17 @@ struct HnsArea {
             const auto found = since.find(h.id);
             const bool was = found != since.end();
             const bool is = hns_outside(was, h.at, at, area);
-            if (!was && is) {
+            if (!was && !is) {
+                const bool told = near.contains(h.id);
+                if (!told && hns_near_edge(false, h.at, at, area)) {
+                    near.insert(h.id);
+                    events.emplace_back(h.id, HnsAreaEvent::edge);
+                } else if (told && !hns_near_edge(true, h.at, at, area)) {
+                    near.erase(h.id);
+                }
+            } else if (!was && is) {
                 since[h.id] = now;
+                near.insert(h.id); // they hear they left; no edge hint on the way back in
                 events.emplace_back(h.id, HnsAreaEvent::left);
             } else if (was && !is) {
                 since.erase(found);
@@ -223,6 +244,33 @@ struct HnsArea {
             }
         }
         return events;
+    }
+};
+
+// How long a ping shows the hiders: 2 s, as one standing still far off is sent a pose a second
+// (server_host.cpp, out of sight), and a game holds what it got for several seconds.
+constexpr std::uint64_t hns_ping_us = 2000000;
+constexpr std::uint64_t hns_ping_warn_us = 5000000; // the hiders hear of it this long before
+enum class HnsPingEvent { none, soon, ping };
+struct HnsPing {
+    unsigned done{}, warned{}; // pings so far, and warnings
+    std::uint64_t until{};     // the current ping shows the hiders until then
+    bool showing(std::uint64_t now) const { return now < until; }
+    // A ping every `every` of seeking from `seek_started`, and its warning hns_ping_warn_us before (0: never).
+    HnsPingEvent step(std::uint64_t now, std::uint64_t seek_started, std::uint64_t every) {
+        if (!every) return HnsPingEvent::none;
+        const auto due = seek_started + every * (done + 1);
+        if (now >= due) {
+            ++done;
+            warned = done;
+            until = now + hns_ping_us;
+            return HnsPingEvent::ping;
+        }
+        if (now + hns_ping_warn_us >= due && warned <= done) {
+            warned = done + 1;
+            return HnsPingEvent::soon;
+        }
+        return HnsPingEvent::none;
     }
 };
 

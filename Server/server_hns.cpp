@@ -1,5 +1,6 @@
 #include "server_host.h"
 #include "server_hns.h"
+#include <cmath>
 #include <cstdio>
 
 // Hide and seek: hns-start, hns-stop, hns-found and hns-status, the phases on their timers, finds
@@ -49,7 +50,8 @@ bool Host::hns_hides(std::uint64_t source, std::uint64_t recipient) const {
         for (unsigned i = 0; i < 3; ++i) d += ((*at)[i] - (*there)[i]) * ((*at)[i] - (*there)[i]);
         distance2 = d;
     }
-    return hns_hidden(hns_.phase, from, to, distance2, hns_.settings.reveal, hns_.area.outside(source));
+    return hns_hidden(hns_.phase, from, to, distance2, hns_.settings.reveal, hns_.area.outside(source),
+                      hns_.phase == HnsPhase::seek && hns_.ping.showing(now_));
 }
 
 std::string Host::hns_command(std::string_view name, std::string_view argument, std::uint64_t admin) {
@@ -199,6 +201,12 @@ void Host::tick_hns() {
         for (const auto &[id, event] : round.area.step(now_, hiders, round.at, round.settings.area,
                                                        std::uint64_t{round.settings.out_s} * 1000000)) {
             const auto who = round.names[id] + " (" + std::to_string(id) + ")";
+            if (event == HnsAreaEvent::edge) {
+                const auto &p = std::find_if(hiders.begin(), hiders.end(), [&](const HnsPos &h) { return h.id == id; })->at;
+                const auto metres = std::hypot(p[0] - round.at[0], p[2] - round.at[2]);
+                log_("[hns] " + who + " near the edge: " + std::to_string(std::lround(metres)) + " m of " +
+                     std::to_string(std::lround(round.settings.area)) + " m");
+            }
             if (event == HnsAreaEvent::left) log_("[hns] " + who + " left the area");
             if (event == HnsAreaEvent::back) log_("[hns] " + who + " is back in the area");
             if (event == HnsAreaEvent::out) {
@@ -234,6 +242,10 @@ void Host::tick_hns() {
             log_("[hns] seek phase");
         }
     } else {
+        // The ping: a warning for the hiders, then every seeker sees every hider for a moment.
+        const auto ping = round.ping.step(now_, round.seek_started, std::uint64_t{round.settings.ping_s} * 1000000);
+        if (ping == HnsPingEvent::soon) log_("[hns] ping in 5 s");
+        if (ping == HnsPingEvent::ping) log_("[hns] ping");
         std::vector<HnsPos> seekers, hiders;
         for (const auto &[id, role] : round.roles) {
             const auto *guest = find(id);

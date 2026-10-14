@@ -425,6 +425,37 @@ int run() {
     check(logged("[hns] Hider Two (" + id(h2) + ") is out: outside the area"), "The second hider was not put out");
     check(logged("[hns] ended: Hider Three win"), "The last hider inside the area did not win");
 
+    // Near the edge, and the ping: every `ping` seconds of seeking every seeker sees every hider for a moment.
+    const auto round_start = log.size(); // earlier rounds pinged too: look only at this round's lines
+    const auto since = [&](std::string_view line) {
+        return std::any_of(log.begin() + static_cast<std::ptrdiff_t>(round_start), log.end(),
+                           [&](const std::string &l) { return l.ends_with(line); });
+    };
+    reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h3) + " at 0 0 0 hide 10 seek 300 area 100 out 0 ping 15");
+    check(reply.find("Hide and seek started: 1 seeker(s), 2 hider(s).") == 0, "Round with pings: " + reply);
+    run_for(1000000);
+    s.at = {0, 0, 0};
+    h1.at = {0, 0, -60};
+    h3.at = {90, 0, 0};
+    run_for(2000000);
+    check(since("[hns] Hider Three (" + id(h3) + ") near the edge: 90 m of 100 m"), "The edge hint was not logged");
+    for (unsigned i = 0; i < 200 && command("hns-status").find("Seek phase") != 0; ++i) run_for(100000);
+    check(!sees(s, h1), "Before a ping, a hider 60 m away is sent to the seeker");
+    check(!since("[hns] ping in 5 s"), "A ping was announced right as the seek phase began");
+    for (unsigned i = 0; i < 400 && !since("[hns] ping in 5 s"); ++i) run_for(50000);
+    check(since("[hns] ping in 5 s"), "The ping was not announced");
+    check(!since("[hns] ping"), "The ping came with its warning");
+    for (unsigned i = 0; i < 200 && !since("[hns] ping"); ++i) run_for(50000);
+    check(since("[hns] ping"), "No ping");
+    s.poses_from.clear();
+    h3.poses_from.clear();
+    run_for(1900000);
+    check(s.poses_from[h1.id] > 0, "During a ping, the seeker is not sent a hider 60 m away");
+    check(h3.poses_from[h1.id] == 0, "During a ping, a hider is sent another hider");
+    run_for(200000);
+    check(!sees(s, h1), "After the ping, the seeker is still sent a hider 60 m away");
+    check(command("hns-stop") == "Hide and seek stopped.", "hns-stop after pings");
+
     // A new map ends the round.
     reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h2) + " at 0 0 0 hide 10 seek 30");
     run_for(1000000);
