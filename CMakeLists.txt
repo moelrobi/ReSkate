@@ -95,6 +95,25 @@ if(DINGOSDK_BUILD_MULTIPLAYER_TESTS)
             dingosdk_lz4 dingosdk_zstd)
     endif()
     add_test(NAME server_config COMMAND dingosdk_server_config_tests)
+    # Personal polls and cards (Server/server_personal.cpp, built into every target that builds
+    # Server/server_host.cpp: see the end of this file), with simulated players.
+    add_executable(dingosdk_server_personal_tests Server/Test/server_personal_tests.cpp Server/server_host.cpp Server/server_party.cpp
+        Extension/Multiplayer/Session/party_book.cpp Server/server_config.cpp Server/server_update.cpp Server/server_release.cpp
+        $<$<BOOL:${WIN32}>:Launcher/updater.cpp> Server/global_bans.cpp Server/server_words.cpp Extension/Multiplayer/developer_identity.cpp
+        Extension/Multiplayer/word_lists.cpp Extension/Multiplayer/Net/protocol.cpp Extension/Multiplayer/Net/delta_codec.cpp
+        Extension/Multiplayer/Net/wire_codec.cpp Extension/Multiplayer/Remote/playback_buffers.cpp
+        Extension/Multiplayer/Session/password.cpp Server/server_activity.cpp Server/server_votes.cpp Server/server_commands.cpp
+        Server/server_parks.cpp Extension/Throwdowns/throwdown_wire.cpp)
+    target_include_directories(dingosdk_server_personal_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+    target_include_directories(dingosdk_server_personal_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/External/steam_networking")
+    if(WIN32)
+        target_link_libraries(dingosdk_server_personal_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
+            dingosdk_lz4 dingosdk_zstd dingosdk_logging dingosdk_miniz dingosdk_word_filter dingosdk_https winhttp bcrypt winmm)
+    else()
+        target_link_libraries(dingosdk_server_personal_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
+            dingosdk_lz4 dingosdk_zstd dingosdk_miniz dingosdk_word_filter OpenSSL::Crypto dl pthread)
+    endif()
+    add_test(NAME server_personal COMMAND dingosdk_server_personal_tests)
     # Park mods spawned by the server's host, over a transport that is not Steam's.
     add_executable(dingosdk_server_park_tests Server/Test/server_park_tests.cpp Server/server_host.cpp Server/server_party.cpp
         Extension/Multiplayer/Session/party_book.cpp Server/server_config.cpp Server/server_update.cpp Server/server_release.cpp
@@ -343,26 +362,8 @@ foreach(target IN LISTS project_targets)
     endif()
 endforeach()
 # Personal polls and cards (Server/server_personal.cpp: poll-to, announce-to for several players) are part
-# of the server's host: built into every target that builds Server/server_host.cpp.
-if(DINGOSDK_BUILD_MULTIPLAYER_TESTS)
-    add_executable(dingosdk_server_personal_tests Server/Test/server_personal_tests.cpp Server/server_host.cpp Server/server_party.cpp
-        Extension/Multiplayer/Session/party_book.cpp Server/server_config.cpp Server/server_update.cpp Server/server_release.cpp
-        $<$<BOOL:${WIN32}>:Launcher/updater.cpp> Server/global_bans.cpp Server/server_words.cpp Extension/Multiplayer/developer_identity.cpp
-        Extension/Multiplayer/word_lists.cpp Extension/Multiplayer/Net/protocol.cpp Extension/Multiplayer/Net/delta_codec.cpp
-        Extension/Multiplayer/Net/wire_codec.cpp Extension/Multiplayer/Remote/playback_buffers.cpp
-        Extension/Multiplayer/Session/password.cpp Server/server_activity.cpp Server/server_votes.cpp Server/server_commands.cpp
-        Server/server_parks.cpp Extension/Throwdowns/throwdown_wire.cpp)
-    target_include_directories(dingosdk_server_personal_tests PRIVATE "${PROJECT_SOURCE_DIR}")
-    target_include_directories(dingosdk_server_personal_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/External/steam_networking")
-    if(WIN32)
-        target_link_libraries(dingosdk_server_personal_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
-            dingosdk_lz4 dingosdk_zstd dingosdk_logging dingosdk_miniz dingosdk_word_filter dingosdk_https winhttp bcrypt winmm)
-    else()
-        target_link_libraries(dingosdk_server_personal_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
-            dingosdk_lz4 dingosdk_zstd dingosdk_miniz dingosdk_word_filter OpenSSL::Crypto dl pthread)
-    endif()
-    add_test(NAME server_personal COMMAND dingosdk_server_personal_tests)
-endif()
+# of the server's host: built into every target that builds Server/server_host.cpp, so no source list
+# needs editing. Last, so it sees every target.
 get_property(personal_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(target IN LISTS personal_targets)
     get_target_property(personal_sources ${target} SOURCES)
