@@ -749,8 +749,6 @@ std::string custom_votes_error(const std::vector<CustomVote> &votes) {
     return {};
 }
 bool custom_command_name_free(std::string_view name) noexcept {
-    for (const std::string_view taken : {"hns-start", "hns-stop", "hns-found", "hns-status"}) // server_hns.cpp
-        if (name == taken) return false;
     // The chat's own commands, then the server commands admins type as /<command>.
     for (const std::string_view taken :
          {"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
@@ -762,6 +760,8 @@ bool custom_command_name_free(std::string_view name) noexcept {
           "players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "teleport",
           "tod", "tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
           "vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update"})
+        if (name == taken) return false;
+    for (const std::string_view taken : {"hns-start", "hns-stop", "hns-found", "hns-status"}) // server_hns.cpp
         if (name == taken) return false;
     // A number is an answer to a poll ("/2").
     return !std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; });
