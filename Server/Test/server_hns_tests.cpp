@@ -55,6 +55,19 @@ int main() {
     check(refused("1 2,3 at 0 0 0 find 0.5"), "find 0.5 refused");
     check(refused("1 2,3 at 0 0 0 hold 200"), "hold 200 refused");
     check(refused("1 2,3 at 0 0 0 hide"), "a setting without a value refused");
+    // The play area: a circle around the spot, and how long a hider may stay outside it.
+    check(parse_hns_start("1 2,3 at 0 0 0", s).empty() && s.settings.area == 100.f && s.settings.out_s == 60,
+          "area 100 m and out after 60 s by default");
+    check(parse_hns_start("1 2,3 at 0 0 0 area 150 out 90", s).empty() && s.settings.area == 150.f && s.settings.out_s == 90,
+          "area and out read");
+    check(parse_hns_start("1 2,3 at 0 0 0 area 20 out 10", s).empty(), "the lower limits of area and out accepted");
+    check(parse_hns_start("1 2,3 at 0 0 0 area 2000 out 600", s).empty(), "the upper limits of area and out accepted");
+    check(parse_hns_start("1 2,3 at 0 0 0 out 0", s).empty() && s.settings.out_s == 0, "out 0: nobody is put out");
+    check(refused("1 2,3 at 0 0 0 area 19"), "area 19 refused");
+    check(refused("1 2,3 at 0 0 0 area 2001"), "area 2001 refused");
+    check(refused("1 2,3 at 0 0 0 out 5"), "out 5 refused");
+    check(refused("1 2,3 at 0 0 0 out 601"), "out 601 refused");
+    check(refused("1 2,3 at 0 0 0 out 1.5"), "out is whole seconds");
     check(refused("1 2,3 at 0 0 0 hide 1.5"), "seconds are whole numbers");
     check(refused("1 2,3 at 0 0 0 speed 3"), "an unknown word refused");
     check(refused("1 2,3 at 1e99 0 0"), "an absurd coordinate refused");
@@ -86,6 +99,41 @@ int main() {
     check(hns_hidden(P::seek, R::hider, R::seeker, far, 25.f), "a hider 26 m from a seeker is not");
     check(hns_hidden(P::seek, R::hider, R::seeker, stale, 25.f), "without fresh positions a hider stays hidden");
     check(hns_hidden(P::hide, R::hider, R::seeker, std::optional<float>(1.f), 25.f), "while hiding, not even at 1 m");
+    // Outside the play area a hider is seen by the seekers at any distance (seeking), and while hiding still by none.
+    check(!hns_hidden(P::seek, R::hider, R::seeker, far, 25.f, true), "a hider outside the area is seen from afar");
+    check(!hns_hidden(P::seek, R::hider, R::seeker, stale, 25.f, true), "outside the area even without a fresh distance");
+    check(hns_hidden(P::hide, R::hider, R::seeker, far, 25.f, true), "outside the area while hiding: still hidden");
+
+    // Inside or outside: horizontal distance from the spot, 5 m to come back in, so the edge does not flicker.
+    const std::array<float, 3> spot{0, 0, 0};
+    check(!hns_outside(false, {99, 0, 0}, spot, 100.f), "99 m: inside");
+    check(hns_outside(false, {0, 0, 101}, spot, 100.f), "101 m: outside");
+    check(!hns_outside(false, {0, 500, 0}, spot, 100.f), "500 m straight up: inside (only the ground counts)");
+    check(hns_outside(true, {97, 0, 0}, spot, 100.f), "outside, back at 97 m: still outside");
+    check(!hns_outside(true, {94, 0, 0}, spot, 100.f), "outside, back at 94 m: inside");
+
+    // Outside for out_s in a row: out of the round. Coming back in starts it over.
+    using AE = HnsAreaEvent;
+    using Events = std::vector<std::pair<std::uint64_t, AE>>;
+    HnsArea area;
+    const std::uint64_t sec = 1000000;
+    const std::vector<HnsPos> in{{2, {10, 0, 0}}}, out{{2, {150, 0, 0}}};
+    check(area.step(0, in, spot, 100.f, 60 * sec).empty(), "inside: nothing");
+    check(area.step(sec, out, spot, 100.f, 60 * sec) == Events{{2, AE::left}}, "leaving the area");
+    check(area.step(30 * sec, out, spot, 100.f, 60 * sec).empty(), "outside 29 s: nothing new");
+    check(area.step(31 * sec, in, spot, 100.f, 60 * sec) == Events{{2, AE::back}}, "back in");
+    check(area.outside(2) == false, "back in: not outside");
+    check(area.step(32 * sec, out, spot, 100.f, 60 * sec) == Events{{2, AE::left}}, "out again");
+    check(area.outside(2), "outside");
+    check(area.step(91 * sec, out, spot, 100.f, 60 * sec).empty(), "59 s outside this time: not out yet");
+    check(area.step(92 * sec, out, spot, 100.f, 60 * sec) == Events{{2, AE::out}}, "60 s outside in a row: out");
+    HnsArea never;
+    never.step(0, out, spot, 100.f, 0);
+    check(never.step(3600 * sec, out, spot, 100.f, 0).empty(), "out 0: an hour outside and still in the round");
+    HnsArea quiet;
+    quiet.step(0, out, spot, 100.f, 60 * sec);
+    check(quiet.step(61 * sec, {}, spot, 100.f, 60 * sec).empty(), "no fresh position: no verdict");
+    check(quiet.step(62 * sec, out, spot, 100.f, 60 * sec) == Events{{2, AE::out}}, "outside all along: out once seen again");
 
     // Finds: within `find` for a whole second.
     HnsFinds finds;

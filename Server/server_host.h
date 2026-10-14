@@ -312,6 +312,7 @@ class Host {
         std::map<std::uint64_t, HnsRole> roles; // the players of the round
         std::map<std::uint64_t, std::string> names;
         HnsFinds finds;
+        HnsArea area; // hiders outside the play area
     };
     HnsRound hns_;
     std::string hns_command(std::string_view name, std::string_view argument, std::uint64_t admin);

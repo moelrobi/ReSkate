@@ -49,7 +49,7 @@ bool Host::hns_hides(std::uint64_t source, std::uint64_t recipient) const {
         for (unsigned i = 0; i < 3; ++i) d += ((*at)[i] - (*there)[i]) * ((*at)[i] - (*there)[i]);
         distance2 = d;
     }
-    return hns_hidden(hns_.phase, from, to, distance2, hns_.settings.reveal);
+    return hns_hidden(hns_.phase, from, to, distance2, hns_.settings.reveal, hns_.area.outside(source));
 }
 
 std::string Host::hns_command(std::string_view name, std::string_view argument, std::uint64_t admin) {
@@ -187,6 +187,25 @@ void Host::tick_hns() {
         round.roles[id] = HnsRole::seeker;
         round.finds = {};
         log_("[hns] " + round.names[id] + " (" + std::to_string(id) + ") seeks now: the seekers left");
+    }
+    // The play area: who left it, came back, or stayed outside too long and is out of the round.
+    {
+        std::vector<HnsPos> hiders;
+        for (const auto &[id, role] : round.roles) {
+            if (role != HnsRole::hider) continue;
+            const auto *guest = find(id);
+            if (const auto position = guest ? hns_position(*guest) : std::nullopt) hiders.push_back({id, *position});
+        }
+        for (const auto &[id, event] : round.area.step(now_, hiders, round.at, round.settings.area,
+                                                       std::uint64_t{round.settings.out_s} * 1000000)) {
+            const auto who = round.names[id] + " (" + std::to_string(id) + ")";
+            if (event == HnsAreaEvent::left) log_("[hns] " + who + " left the area");
+            if (event == HnsAreaEvent::back) log_("[hns] " + who + " is back in the area");
+            if (event == HnsAreaEvent::out) {
+                log_("[hns] " + who + " is out: outside the area");
+                round.roles.erase(id); // like one who left: sees everyone, seen by everyone, wins nothing
+            }
+        }
     }
     std::vector<std::uint64_t> found_now;
     if (round.phase == HnsPhase::hide) {

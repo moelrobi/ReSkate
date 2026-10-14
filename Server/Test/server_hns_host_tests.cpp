@@ -393,6 +393,38 @@ int run() {
     run_for(4000000);
     check(s.joined, "Seeker Sam did not come back");
 
+    // The play area: outside it a hider is seen from afar, and after `out` seconds outside is out.
+    reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h2) + "," + id(h3) +
+                    " at 0 0 0 hide 10 seek 300 area 100 out 20");
+    check(reply.find("Hide and seek started: 1 seeker(s), 3 hider(s).") == 0, "Round with an area: " + reply);
+    run_for(1000000);
+    s.at = {0, 0, 0};
+    h1.at = {120, 0, 0};
+    h2.at = {0, 0, 50};
+    h3.at = {0, 0, -50};
+    run_for(2000000);
+    check(logged("[hns] Hider One (" + id(h1) + ") left the area"), "Leaving the area was not logged");
+    for (unsigned i = 0; i < 200 && command("hns-status").find("Seek phase") != 0; ++i) run_for(100000);
+    s.at = {30, 0, 0};
+    check(sees(s, h1), "A hider outside the area, 90 m away, is not sent to the seeker");
+    check(!sees(s, h2), "A hider inside the area, 58 m away, is sent to the seeker");
+    h1.at = {95, 0, 0};
+    run_for(1000000);
+    check(logged("[hns] Hider One (" + id(h1) + ") is back in the area"), "Coming back in was not logged");
+    check(!sees(s, h1), "A hider back in the area, 65 m away, is still sent to the seeker");
+    h1.at = {150, 0, 0};
+    run_for(21000000);
+    check(logged("[hns] Hider One (" + id(h1) + ") is out: outside the area"), "20 s outside did not put the hider out");
+    {
+        const auto status = command("hns-status");
+        check(status.find("Seek phase") == 0 && status.find("Hider One") == std::string::npos,
+              "The round did not go on without the hider who is out: " + status);
+    }
+    h2.at = {0, 0, 150};
+    run_for(21000000);
+    check(logged("[hns] Hider Two (" + id(h2) + ") is out: outside the area"), "The second hider was not put out");
+    check(logged("[hns] ended: Hider Three win"), "The last hider inside the area did not win");
+
     // A new map ends the round.
     reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h2) + " at 0 0 0 hide 10 seek 30");
     run_for(1000000);

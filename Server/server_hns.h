@@ -24,6 +24,8 @@ enum class HnsRole { none, seeker, hider };
 struct HnsSettings {
     unsigned hide_s = 60, seek_s = 300;
     float reveal = 25.f, find = 3.f, hold = 15.f;
+    float area = 100.f; // the play area: a circle this wide around the spot
+    unsigned out_s = 60; // outside the area this long in a row: out of the round (0: never)
 };
 constexpr std::uint64_t hns_dwell_us = 1000000; // within `find` this long is a find
 constexpr std::uint64_t hns_fresh_us = 1000000; // a position older than this is not trusted
@@ -36,7 +38,8 @@ struct HnsStart {
     HnsSettings settings;
 };
 constexpr std::string_view hns_start_usage =
-    "hns-start <SteamID64,...> <SteamID64,...> at <x y z|player> [hide <s>] [seek <s>] [reveal <m>] [find <m>] [hold <m>]";
+    "hns-start <SteamID64,...> <SteamID64,...> at <x y z|player> [hide <s>] [seek <s>] [reveal <m>] [find <m>] [hold <m>] "
+    "[area <m>] [out <s>]";
 
 namespace hns_detail {
 inline std::optional<float> decimal(std::string_view word) {
@@ -106,18 +109,22 @@ inline std::string parse_hns_start(std::string_view argument, HnsStart &out) {
         settings = remaining;
         const auto key = lower(name);
         if (value.empty()) return "\"" + std::string(name) + "\" needs a value.";
-        if (key == "hide" || key == "seek") {
+        if (key == "hide" || key == "seek" || key == "out") {
             const auto seconds = number(value);
-            const unsigned least = key == "hide" ? 10 : 30, most = key == "hide" ? 600 : 3600;
-            if (!seconds || *seconds < least || *seconds > most)
-                return key + " is " + std::to_string(least) + " to " + std::to_string(most) + " seconds.";
-            (key == "hide" ? out.settings.hide_s : out.settings.seek_s) = static_cast<unsigned>(*seconds);
+            const unsigned least = key == "hide" ? 10 : key == "seek" ? 30 : 10;
+            const unsigned most = key == "hide" ? 600 : key == "seek" ? 3600 : 600;
+            if (!seconds || ((*seconds < least || *seconds > most) && !(key == "out" && *seconds == 0)))
+                return key + " is " + std::to_string(least) + " to " + std::to_string(most) + " seconds" +
+                       (key == "out" ? " (0: never)." : ".");
+            (key == "hide" ? out.settings.hide_s : key == "seek" ? out.settings.seek_s : out.settings.out_s) =
+                static_cast<unsigned>(*seconds);
             continue;
         }
-        const float least = key == "reveal" ? 5.f : key == "find" ? 1.f : 5.f;
-        const float most = key == "reveal" ? 200.f : key == "find" ? 20.f : 100.f;
+        const float least = key == "reveal" ? 5.f : key == "find" ? 1.f : key == "area" ? 20.f : 5.f;
+        const float most = key == "reveal" ? 200.f : key == "find" ? 20.f : key == "area" ? 2000.f : 100.f;
         float *target = key == "reveal" ? &out.settings.reveal : key == "find" ? &out.settings.find
                                                               : key == "hold"   ? &out.settings.hold
+                                                              : key == "area"   ? &out.settings.area
                                                                                 : nullptr;
         if (!target) return "\"" + std::string(name) + "\" is not a setting: " + std::string(hns_start_usage);
         const auto metres = hns_detail::decimal(value);
@@ -133,10 +140,22 @@ inline std::string parse_hns_start(std::string_view argument, HnsStart &out) {
 
 // Whether a packet of a skater whose role is `source` must not reach a player whose role is
 // `recipient`. distance2: the square of the distance between them, none when either position is stale.
-inline bool hns_hidden(HnsPhase phase, HnsRole source, HnsRole recipient, std::optional<float> distance2, float reveal) {
+// outside: the hider is outside the play area, where, seeking, every seeker sees them.
+inline bool hns_hidden(HnsPhase phase, HnsRole source, HnsRole recipient, std::optional<float> distance2, float reveal,
+                       bool outside = false) {
     if (phase == HnsPhase::off || source != HnsRole::hider || recipient != HnsRole::seeker) return false;
     if (phase == HnsPhase::hide) return true;
+    if (outside) return false;
     return !distance2 || *distance2 > reveal * reveal;
+}
+
+constexpr float hns_area_margin = 5.f; // back inside only this far within the edge: riding along it does not flicker
+// Whether a player at `position` is outside the play area around `at`: the distance along the
+// ground (y is up), beyond `area`, or for one who `was` outside, beyond `area` less the margin.
+inline bool hns_outside(bool was, const std::array<float, 3> &position, const std::array<float, 3> &at, float area) {
+    const float dx = position[0] - at[0], dz = position[2] - at[2];
+    const float edge = was ? area - hns_area_margin : area;
+    return dx * dx + dz * dz > edge * edge;
 }
 
 struct HnsPos {
@@ -172,6 +191,35 @@ struct HnsFinds {
             std::erase_if(near_since, [&](const auto &entry) { return entry.first.second == hider; });
         }
         return pairs;
+    }
+};
+
+enum class HnsAreaEvent { left, back, out };
+struct HnsArea {
+    std::map<std::uint64_t, std::uint64_t> since; // hider: outside since
+    bool outside(std::uint64_t id) const { return since.contains(id); }
+    // Who left the area, came back, or has been outside for out_us in a row (0: never out), from the
+    // hiders' fresh positions; one without a fresh position keeps where they were.
+    std::vector<std::pair<std::uint64_t, HnsAreaEvent>> step(std::uint64_t now, const std::vector<HnsPos> &hiders,
+                                                             const std::array<float, 3> &at, float area,
+                                                             std::uint64_t out_us) {
+        std::vector<std::pair<std::uint64_t, HnsAreaEvent>> events;
+        for (const auto &h : hiders) {
+            const auto found = since.find(h.id);
+            const bool was = found != since.end();
+            const bool is = hns_outside(was, h.at, at, area);
+            if (!was && is) {
+                since[h.id] = now;
+                events.emplace_back(h.id, HnsAreaEvent::left);
+            } else if (was && !is) {
+                since.erase(found);
+                events.emplace_back(h.id, HnsAreaEvent::back);
+            } else if (was && out_us && now - found->second >= out_us) {
+                since.erase(found);
+                events.emplace_back(h.id, HnsAreaEvent::out);
+            }
+        }
+        return events;
     }
 };
 
