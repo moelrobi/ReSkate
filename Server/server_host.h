@@ -4,6 +4,7 @@
 #include "server_config.h"
 #include "board_check.h"
 #include "speed_check.h"
+#include "server_hns.h"
 #include "Engine/Game/Multiplayer/chat_rate.h"
 #include "Extension/Multiplayer/Net/delta_codec.h"
 #include "Extension/Multiplayer/Net/pose_batch.h"
@@ -259,6 +260,24 @@ class Host {
         guest.away_warned = false;
     }
     void remove_away();
+    // Hide and seek (server_hns.cpp): hns-start, hns-stop, hns-found, hns-status; timed every tick,
+    // and whose poses, sound, voice and effects reach whom (broadcast).
+    struct HnsRound {
+        HnsPhase phase = HnsPhase::off;
+        std::uint64_t world{}, started{}, seek_started{}, phase_ends{}, last_hold{};
+        std::array<float, 3> at{};
+        HnsSettings settings;
+        std::map<std::uint64_t, HnsRole> roles; // the players of the round
+        std::map<std::uint64_t, std::string> names;
+        HnsFinds finds;
+    };
+    HnsRound hns_;
+    std::string hns_command(std::string_view name, std::string_view argument, std::uint64_t admin);
+    void tick_hns();
+    void hns_end(const std::vector<std::uint64_t> &found_now);
+    bool hns_hides(std::uint64_t source, std::uint64_t recipient) const;
+    std::string hns_name(const Guest &guest) const;
+    std::optional<std::array<float, 3>> hns_position(const Guest &guest) const;
     bool vote_recount_{}; // a player left: recount in tick(), never while guests_ is being walked
     std::map<std::uint64_t, std::uint64_t> vote_cooldowns_;
     std::uint64_t map_since_{}; // rotation clock start: the last map change, or while nobody is on

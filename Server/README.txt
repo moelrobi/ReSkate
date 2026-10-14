@@ -568,6 +568,33 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 (-247, 2172, -259)"; y is up. Several players
                                 stand in a ring round the target. Logged as
                                 "[teleport] <n> player(s) to <target> by <who>".
+  hns-start <seekers> <hiders> at <x y z|player> [hide <s>] [seek <s>] [reveal <m>] [find <m>] [hold <m>]
+                                Hide and seek. <seekers> and <hiders> are
+                                SteamID64s joined by commas (at least 1 seeker
+                                and 2 hiders, at most 64 in all; ones not on or
+                                not in the world yet are skipped and named).
+                                Everyone in the round is sent to the spot (a
+                                place, or where a player stands). For hide
+                                seconds (10-600, default 60) seekers see no
+                                hider and are sent back if they go further than
+                                hold (5-100 m, default 15) from the spot. Then for
+                                seek seconds (30-3600, default 300) a seeker sees
+                                a hider (skater, name, sound, voice) only within
+                                reveal (5-200 m, default 25); one within find
+                                (1-20 m, default 3) of a hider for a second has
+                                found them, and the hider seeks from then on.
+                                The last hider wins, or every hider still hidden
+                                when the time is up or the seekers have left.
+                                Players not in the round see everyone. A new
+                                map ends the round. Logged as "[hns] started:
+                                ...", "[hns] seek phase", "[hns] <seeker> (<id>)
+                                found <hider> (<id>) in 63.2 s", "[hns] <name>
+                                (<id>) left", "[hns] ended: <names> win" or
+                                "[hns] ended: nobody wins".
+  hns-found <player>            The hider is found (seek phase): "[hns] <name>
+                                (<id>) found by <who>".
+  hns-stop                      Ends the round: "[hns] stopped by <who>".
+  hns-status                    The phase, the seconds left, seekers and hiders.
   park <construction|historic|financial> <layout>
   park random                  Randomize all three park slots (excludes empty lots).
   park-mod list                 The park mods (maps.park_mods); spawned ones with

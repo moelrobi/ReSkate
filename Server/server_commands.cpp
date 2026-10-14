@@ -25,6 +25,7 @@ constexpr std::string_view help_text =
     "votes polls off|admins|everyone | votes poll-seconds <n> | votes starter-yes on|off\n"
     "vote <map|kick|tod|extend|<custom vote>> [argument] | poll <question> | <answer> | <answer>... | poll end\n"
     "poll-run <command with {answer}> | <question> | <answer> | <answer>...\n"
+    "hns-start <SteamID64,...> <SteamID64,...> at <x y z|player> [hide|seek <s>] [reveal|find|hold <m>] | hns-stop | hns-found <player> | hns-status\n"
     "announce <text> | announce-to <player> <text> | announcements [list|add <text>|remove <n>|clear|interval <minutes>|off]\n"
     "map-pool [add|remove <map>|clear] | rotation [<minutes>|off | vote on|off | stay <minutes>|off | announce on|off | extend [minutes]]\n"
     "park <lot> <layout> | park random | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
@@ -73,6 +74,8 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return text;
     };
     if (name.empty() || name == "help") return std::string(help_text);
+    if (name == "hns-start" || name == "hns-stop" || name == "hns-found" || name == "hns-status")
+        return hns_command(name, argument, admin);
     if (name == "status")
         return config_.name + " | " + map_name() + " | " + std::to_string(players()) + "/" +
                std::to_string(config_.max_players) + " players | " + std::to_string(config_.tps) + " TPS | voice " +

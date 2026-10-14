@@ -336,12 +336,38 @@ if(DINGOSDK_BUILD_HALL_OF_MEAT_TESTS)
     target_link_libraries(dingosdk_hall_of_meat_skeleton_tests PRIVATE dingosdk_game_archives dingosdk_logging)
     add_test(NAME hall_of_meat_skeleton COMMAND dingosdk_hall_of_meat_skeleton_tests "${DINGOSDK_TEST_GAME_ROOT}")
 endif()
-# Hide and seek (Server/server_hns.h, Server/server_hns.cpp): the rules are pure and tested on their own.
+# Hide and seek (Server/server_hns.h, Server/server_hns.cpp) is part of the server's host: built into
+# every target that builds Server/server_host.cpp, so no source list needs editing.
 if(DINGOSDK_BUILD_MULTIPLAYER_TESTS)
     add_executable(dingosdk_server_hns_tests Server/Test/server_hns_tests.cpp)
     target_include_directories(dingosdk_server_hns_tests PRIVATE "${PROJECT_SOURCE_DIR}")
     add_test(NAME server_hns COMMAND dingosdk_server_hns_tests)
+    # Rounds on the server's host, with simulated players, as each player's game reads what it is sent.
+    add_executable(dingosdk_server_hns_host_tests Server/Test/server_hns_host_tests.cpp Server/server_host.cpp Server/server_party.cpp
+        Extension/Multiplayer/Session/party_book.cpp Server/server_config.cpp Server/server_update.cpp Server/server_release.cpp
+        $<$<BOOL:${WIN32}>:Launcher/updater.cpp> Server/global_bans.cpp Server/server_words.cpp Extension/Multiplayer/developer_identity.cpp
+        Extension/Multiplayer/word_lists.cpp Extension/Multiplayer/Net/protocol.cpp Extension/Multiplayer/Net/delta_codec.cpp
+        Extension/Multiplayer/Net/wire_codec.cpp Extension/Multiplayer/Remote/playback_buffers.cpp
+        Extension/Multiplayer/Session/password.cpp Server/server_activity.cpp Server/server_votes.cpp Server/server_commands.cpp
+        Server/server_parks.cpp Extension/Throwdowns/throwdown_wire.cpp)
+    target_include_directories(dingosdk_server_hns_host_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+    target_include_directories(dingosdk_server_hns_host_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/External/steam_networking")
+    if(WIN32)
+        target_link_libraries(dingosdk_server_hns_host_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
+            dingosdk_lz4 dingosdk_zstd dingosdk_logging dingosdk_miniz dingosdk_word_filter dingosdk_https winhttp bcrypt winmm)
+    else()
+        target_link_libraries(dingosdk_server_hns_host_tests PRIVATE dingosdk_launcher_support dingosdk_world_layer_scan dingosdk_json
+            dingosdk_lz4 dingosdk_zstd dingosdk_miniz dingosdk_word_filter OpenSSL::Crypto dl pthread)
+    endif()
+    add_test(NAME server_hns_host COMMAND dingosdk_server_hns_host_tests)
 endif()
+get_property(hns_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(target IN LISTS hns_targets)
+    get_target_property(hns_sources ${target} SOURCES)
+    if(hns_sources AND "Server/server_host.cpp" IN_LIST hns_sources)
+        target_sources(${target} PRIVATE Server/server_hns.cpp)
+    endif()
+endforeach()
 get_property(project_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(target IN LISTS project_targets)
     if(NOT target MATCHES "^(dingosdk_imgui|dingosdk_detours|dingosdk_sqlite|dingosdk_lz4|dingosdk_zstd|dingosdk_miniz)$")

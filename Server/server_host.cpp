@@ -522,6 +522,8 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
     for (auto &[id, guest] : guests_) {
         auto &p = *guest;
         if (!p.handshaken || id == except || (gameplay && !p.world_ready)) continue;
+        // Hide and seek: a hider's skater, sound and voice reach a seeker only near enough (server_hns.cpp).
+        if (gameplay && packet.kind != PacketKind::cosmetics && hns_hides(packet.source, id)) continue;
         if (packet.kind == PacketKind::voice) {
             if (!voice_policy_.accepts(packet.voice)) continue;
             // Each listener fades voices by their own hearing distance; the server
@@ -1871,6 +1873,7 @@ void Host::tick(std::uint64_t now) {
     tick_rotation();
     tick_announcements();
     remove_away();
+    tick_hns();
     std::erase_if(vote_cooldowns_, [&](const auto &entry) { return now_ >= entry.second; });
     join_backoff_.prune(now_);
 }
