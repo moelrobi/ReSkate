@@ -136,7 +136,10 @@ Messages
   msg-party            msg-party <player> <text>: to that player's whole party.
   msg-admins           msg-admins <text>: to everyone on who has a command.
   announce             announce <text>: to everyone, in chat and on a card.
-  announce-to          announce-to <player> <text>: to one player, on a card.
+  announce-to          announce-to <player>[,<player>...] <text>: to these
+                       players, each on a card of their own.
+  poll-to              poll-to <player> <question> | <answer> | <answer>...:
+                       a poll only that player sees and answers.
   announcements        The messages posted on a timer: list, add, remove,
                        clear, interval.
 

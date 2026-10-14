@@ -751,7 +751,7 @@ std::string custom_votes_error(const std::vector<CustomVote> &votes) {
 bool custom_command_name_free(std::string_view name) noexcept {
     // The chat's own commands, then the server commands admins type as /<command>.
     for (const std::string_view taken :
-         {"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
+         {"help", "party", "p", "w", "whisper", "tell", "poll", "poll-to", "vote", "yes", "y", "no", "n", "tp",
           "activity-log", "admin", "admins", "afk-kick", "role", "roles", "announce", "announce-throwdowns", "announce-to", "announcements",
           "ban", "bans", "board-check", "bone-scale", "boosts", "boosts-allow", "chat-color", "chat-colour", "clear-objects", "crowd",
           "distances", "effects", "kick", "layer", "layer-sync", "layers", "listed", "map", "map-pool", "maps", "msg",

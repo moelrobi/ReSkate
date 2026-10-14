@@ -150,10 +150,15 @@ void Host::chat_command(Guest &guest, std::string_view line) {
         if (config_.parties) text += "/party: your party (invite, accept, leave...; /party help); /p <message>: party chat\n";
         if (const auto *role = role_of(guest.member.id); staff(role))
             text += role->all_commands
-                ? "Admins: any server command as /<command>, e.g. /kick, /map, /tpall, /votes, /announce, /announce-to, /msg, /msg-party, /msg-admins\n"
+                ? "Admins: any server command as /<command>, e.g. /kick, /map, /tpall, /votes, /announce, /announce-to, /poll-to, /msg, /msg-party, /msg-admins\n"
                 : "Your role (" + role->name + "): these server commands as /<command>: " + joined(role->commands, ", ") + "\n";
         const std::string whisper = "/w <player> <message>: send a private message";
         return reply(guest, (text.empty() ? "This server has no player votes. Type /tp <player> to teleport.\n" : text) + whisper);
+    }
+    // A number from a player with a poll of their own answers that one (server_personal.cpp), not the server's.
+    if (personal_polls_.contains(guest.member.id)) {
+        const auto word = verb == "vote" ? lower(split(rest).first) : verb;
+        if (word.size() == 1 && word[0] >= '1' && word[0] <= '9' && answer_personal_poll(guest, static_cast<std::size_t>(word[0] - '1'))) return;
     }
     if ((verb == "party" || verb == "p") && !may(guest.member.id, multiplayer::role_parties))
         return reply(guest, role_refusal(guest.member.id, "use parties"));
@@ -337,6 +342,18 @@ std::string Host::start_vote(Guest *starter, VoteKind kind, std::string_view arg
     return {};
 }
 
+std::vector<std::string> Host::poll_parts(std::string_view text) {
+    std::vector<std::string> parts;
+    for (std::size_t at = 0; at <= text.size();) {
+        const auto bar = text.find('|', at);
+        auto part = clean_chat_text(trim(text.substr(at, bar == std::string_view::npos ? std::string_view::npos : bar - at)));
+        cut_text(part, parts.empty() ? multiplayer::max_vote_label : multiplayer::max_vote_answer);
+        if (!part.empty()) parts.push_back(std::move(part));
+        if (bar == std::string_view::npos) break;
+        at = bar + 1;
+    }
+    return parts;
+}
 // `starter` nullptr: the server console, which may always ask (the "polls" setting is about
 // players). `run`: a console command run for a clear winner, "{answer}" replaced by it.
 std::string Host::start_poll(Guest *starter, std::string_view text, std::string run) {
@@ -349,16 +366,7 @@ std::string Host::start_poll(Guest *starter, std::string_view text, std::string 
     if (vote_) return running_vote_text();
     if (const auto wait = starter ? vote_cooldowns_.find(starter->member.id) : vote_cooldowns_.end(); !admin && wait != vote_cooldowns_.end() && now_ < wait->second)
         return "Wait " + std::to_string((wait->second - now_) / 1000000 + 1) + " s before starting a poll.";
-    // "<question> | <answer> | <answer>..."
-    std::vector<std::string> parts;
-    for (std::size_t at = 0; at <= text.size();) {
-        const auto bar = text.find('|', at);
-        auto part = clean_chat_text(trim(text.substr(at, bar == std::string_view::npos ? std::string_view::npos : bar - at)));
-        cut_text(part, parts.empty() ? multiplayer::max_vote_label : multiplayer::max_vote_answer);
-        if (!part.empty()) parts.push_back(std::move(part));
-        if (bar == std::string_view::npos) break;
-        at = bar + 1;
-    }
+    const auto parts = poll_parts(text);
     if (parts.size() < 3 || parts.size() > multiplayer::max_vote_answers + 1)
         return slash + "poll <question> | <answer> | <answer>... (2 to " + std::to_string(multiplayer::max_vote_answers) +
                " answers), e.g. " + slash + "poll Next map? | Grom | San Vansterdam";
@@ -655,21 +663,22 @@ std::pair<std::string, bool> Host::votes_command(std::string_view argument) {
 void Host::announce(std::string_view text, std::uint64_t to) {
     const auto line = clean_chat_text(text);
     if (line.empty()) return;
-    const auto *target = to ? find(to) : nullptr;
-    if (to && !target) return;
-    log_("[announcement" + (target ? " -> " + guest_name(*target) : std::string()) + "] " + line);
+    if (to) {
+        if (auto *target = find(to); target && target->handshaken) announce_to({target}, line);
+        return;
+    }
+    log_("[announcement] " + line);
     // Up long enough to read: longer text stays longer.
     const auto seconds = static_cast<std::uint16_t>(std::clamp<std::size_t>(5 + line.size() / 20, 6, 15));
     if (!++announcement_ids_) ++announcement_ids_;
     announcement_ = {announcement_ids_, seconds, line};
-    announcement_for_ = to;
     announcement_until_ = now_ + microseconds(seconds);
     roster_dirty_ = true;
 }
 void Host::tick_announcements() { // the timer waits while nobody is on
+    tick_personal();
     if (announcement_.id && now_ >= announcement_until_) {
         announcement_ = {};
-        announcement_for_ = 0;
         roster_dirty_ = true;
     }
     const auto &a = config_.announcements;

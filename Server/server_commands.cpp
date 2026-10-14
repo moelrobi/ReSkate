@@ -25,7 +25,8 @@ constexpr std::string_view help_text =
     "votes polls off|admins|everyone | votes poll-seconds <n> | votes starter-yes on|off\n"
     "vote <map|kick|tod|extend|<custom vote>> [argument] | poll <question> | <answer> | <answer>... | poll end\n"
     "poll-run <command with {answer}> | <question> | <answer> | <answer>...\n"
-    "announce <text> | announce-to <player> <text> | announcements [list|add <text>|remove <n>|clear|interval <minutes>|off]\n"
+    "poll-to <player> <question> | <answer> | <answer>... (one player's own poll) | poll-to <player> end\n"
+    "announce <text> | announce-to <player>[,<player>...] <text> | announcements [list|add <text>|remove <n>|clear|interval <minutes>|off]\n"
     "map-pool [add|remove <map>|clear] | rotation [<minutes>|off | vote on|off | stay <minutes>|off | announce on|off | extend [minutes]]\n"
     "park <lot> <layout> | park random | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
     "park-mod list | park-mod add <name> [<name>...] [minutes] | park-mod remove <name> [<name>...] | park-mod clear | park-mod reload <name> [<name>...]\n"
@@ -581,14 +582,8 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         announce(argument);
         return "Announced.";
     }
-    if (name == "announce-to") {
-        const auto [who, text] = split(argument);
-        if (text.empty()) return "announce-to <player> <text>";
-        auto *guest = match_player(who);
-        if (!guest) return "No single connected player matches \"" + std::string(who) + "\".";
-        announce(text, guest->member.id);
-        return "Announced to " + guest_name(*guest) + ".";
-    }
+    if (name == "announce-to") return announce_to_command(argument);
+    if (name == "poll-to") return poll_to_command(argument);
     if (name == "vote-cancel") {
         if (!vote_) return "No vote is running.";
         cancel_vote(console ? "the server cancelled it" : "an admin cancelled it");

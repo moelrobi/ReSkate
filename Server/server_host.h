@@ -250,7 +250,6 @@ class Host {
     // The announcement games show (the roster carries it), until announcement_until_.
     multiplayer::ServerAnnouncement announcement_;
     std::uint64_t announcement_until_{};
-    std::uint64_t announcement_for_{}; // the one player shown it, or 0: everyone
     std::uint32_t announcement_ids_{};
     std::uint64_t announced_at_{}; // the last timed announcement, or while nobody is on
     std::size_t next_announcement_{};
@@ -394,7 +393,9 @@ class Host {
     bool send_packet(Guest &, const Packet &, bool reliable, bool fresh, std::span<const std::uint8_t> raw = {},
                      std::span<const std::uint8_t> wire = {});
     void send_required(Guest &, const std::vector<std::uint8_t> &bytes);
-    void broadcast(const Packet &, bool reliable, bool fresh, std::uint64_t except = 0);
+    // `only`: to these players alone; `skip`: not to these.
+    void broadcast(const Packet &, bool reliable, bool fresh, std::uint64_t except = 0,
+                   const std::set<std::uint64_t> *only = nullptr, const std::set<std::uint64_t> *skip = nullptr);
     void send_roster();
     void send_world_state();
     void send_chat(std::string_view text, Guest *only = nullptr);
@@ -417,6 +418,8 @@ class Host {
     // Starting a vote or poll: nullptr is the server console; the text says why it did not start ("" = it did).
     std::string start_vote(Guest *starter, VoteKind, std::string_view argument, std::size_t custom = 0);
     std::string start_poll(Guest *starter, std::string_view text, std::string run = {});
+    // "<question> | <answer> | <answer>...", each part cleaned and cut to length (empty parts dropped).
+    static std::vector<std::string> poll_parts(std::string_view text);
     void cast_vote(Guest &, bool yes);
     void answer_poll(Guest &, std::size_t answer);
     std::string end_poll(Guest *by);
@@ -438,6 +441,32 @@ class Host {
     // The announcement card on every player's screen, or only on player `to`'s (not in chat).
     void announce(std::string_view text, std::uint64_t to = 0);
     void tick_announcements(); // the owner's messages in turn, on their timer
+    // Personal polls and cards (server_personal.cpp). A player's own card (announce-to) shows
+    // over the global one until it expires, then the global one again; a player's own poll
+    // (poll-to) shows over the global vote or poll until it is answered or ends. Only that
+    // player's roster carries them: everyone else's stays as it was.
+    struct PersonalCard {
+        multiplayer::ServerAnnouncement card;
+        std::uint64_t until{};
+    };
+    struct PersonalPoll {
+        std::uint32_t id{};
+        std::string question;
+        std::vector<std::string> answers;
+        std::uint64_t ends{};
+    };
+    std::map<std::uint64_t, PersonalCard> personal_cards_;
+    std::map<std::uint64_t, PersonalPoll> personal_polls_;
+    void announce_to(const std::vector<Guest *> &players, std::string_view text);
+    std::string announce_to_command(std::string_view argument);
+    std::string poll_to_command(std::string_view argument);
+    void end_personal_poll(std::uint64_t id, std::string_view why);
+    // A number a player typed ("/1"): true when it was about their own poll (answered or refused).
+    bool answer_personal_poll(Guest &, std::size_t answer);
+    void tick_personal();
+    void personal_left(std::uint64_t id, const std::string &name);
+    // The card and poll player `id`'s roster carries instead of the global ones (`card`, `vote`).
+    void personal_roster(std::uint64_t id, multiplayer::ServerAnnouncement &card, multiplayer::ServerVote &vote) const;
     void reply(Guest &, std::string_view text, unsigned max_lines = 12);
     Guest *match_player(std::string_view text);
     // Sends each mover to a ring of `radius` around `at`, 1 m up, so nobody lands inside anyone; how many were sent.

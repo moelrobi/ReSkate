@@ -500,7 +500,8 @@ void Host::flush_poses() {
 }
 // A player said which messages of poses they read in full: the poses in those are ones they hold.
 void Host::pose_ack(Guest &g, const pose_batch::Ack &ack) { g.pose_sender.ack(ack); }
-void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint64_t except) {
+void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint64_t except, const std::set<std::uint64_t> *only,
+                     const std::set<std::uint64_t> *skip) {
     // A pose is rounded once and kept (keep_pose); each recipient is then sent its differences
     // from a pose of this player they hold, several players to a message (flush_poses).
     auto *kept = packet.kind == PacketKind::pose ? [&]() -> Guest::KeptPose * {
@@ -522,6 +523,7 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
     for (auto &[id, guest] : guests_) {
         auto &p = *guest;
         if (!p.handshaken || id == except || (gameplay && !p.world_ready)) continue;
+        if ((only && !only->contains(id)) || (skip && skip->contains(id))) continue;
         if (packet.kind == PacketKind::voice) {
             if (!voice_policy_.accepts(packet.voice)) continue;
             // Each listener fades voices by their own hearing distance; the server
@@ -791,17 +793,27 @@ void Host::send_roster() {
         if (m.party && std::none_of(p.members.begin(), p.members.end(),
                                     [&](const Member &o) { return o.party == m.party && o.party_leader; }))
             m.party_leader = true; // the first listed member of a party missing its leader
-    // An announcement for one player: everyone else's roster goes without it.
-    auto *only = announcement_for_ ? find(announcement_for_) : nullptr;
-    if (only && !only->handshaken) only = nullptr;
-    if (announcement_for_) {
-        const auto shown = p.announcement;
-        p.announcement = {};
-        broadcast(p, true, false, announcement_for_);
-        p.announcement = shown;
-        if (only) send_packet(*only, p, true, false);
-    } else {
-        broadcast(p, true, false);
+    // A player with a card or poll of their own (server_personal.cpp) is sent a roster with it;
+    // players shown the same ones share one. Everyone else gets the same roster.
+    const auto card = p.announcement;
+    const auto vote = p.vote;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::set<std::uint64_t>> own; // by card and poll
+    std::set<std::uint64_t> others;
+    for (const auto &[id, guest] : guests_) {
+        if (!guest->handshaken) continue;
+        auto mine_card = card;
+        auto mine_vote = vote;
+        personal_roster(id, mine_card, mine_vote);
+        if (mine_card == card && mine_vote == vote) continue;
+        own[{mine_card.id, mine_vote.id}].insert(id);
+        others.insert(id);
+    }
+    broadcast(p, true, false, 0, nullptr, others.empty() ? nullptr : &others);
+    for (const auto &[key, players] : own) {
+        p.announcement = card;
+        p.vote = vote;
+        personal_roster(*players.begin(), p.announcement, p.vote);
+        broadcast(p, true, false, 0, &players);
     }
     roster_dirty_ = false;
     last_roster_ = now_;
@@ -955,6 +967,7 @@ void Host::drop(std::uint64_t id, const std::string &reason, const std::string &
         guest->sound_sender.forget(id);
     }
     party_left(id, name);
+    personal_left(id, name);
     // Their vote cooldown stays (tick() drops it once it has run out): leaving and coming
     // back does not let a player start another vote sooner.
     // One voter fewer, or the player a kick vote was about. Counted in tick(): a passing kick

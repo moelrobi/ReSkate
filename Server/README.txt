@@ -400,7 +400,10 @@ messages           Lines the server posts in turn, one every "interval_minutes"
                    (0: off) while players are on. Each is at most one chat line.
                    Announcements show as a card at the top of the screen, not
                    in chat; :emotes: in them (and in polls) show as images. Admins announce something once with announce <text>,
-                   or to one player only with announce-to <player> <text>.
+                   or to some players only with announce-to <player>[,<player>...] <text>:
+                   each of them gets it on a card of their own, beside the
+                   global card (which everyone else keeps seeing, and they see
+                   again once theirs is gone).
 
 "commands" - Chat commands of your own, e.g. /discord or /rules. A list, each:
 name               1-16 of a-z, 0-9, - and _; not one of the server's own
@@ -598,8 +601,22 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
   poll end                      End the running poll now.
   poll-run <command with {answer}> | <question> | <answer>...   A poll whose
                                 winning answer runs the command (console only).
+  poll-to <player> <question> | <answer> | <answer>...   A poll only that player
+                                sees and answers (2 to 6 answers), e.g. a menu.
+                                It shows over the running vote or poll, which
+                                everyone else keeps; /1, /2... (or the card) from
+                                them answer it, and one answer ends it. Several
+                                players can each have one. It also ends after
+                                votes.poll_seconds, when the player leaves, with a
+                                new poll-to to them, or with poll-to <player> end.
+                                The log has, for tools to follow:
+                                  [poll-to] <name> (<SteamID64>) asked #<id>: <question> | <answer>...
+                                  [poll-to] <name> (<SteamID64>) answered #<id>: <n> <answer>
+                                  [poll-to] <name> (<SteamID64>) #<id> ended: timeout|replaced|left|closed
   announce <text>               Tell everyone, in chat and on a card.
-  announce-to <player> <text>   Tell one player, on a card.
+  announce-to <player>[,<player>...] <text>   Tell these players, each on a card
+                                of their own (the global card stays for the rest).
+                                Log: [announcement -> <name>, <name>] <text>
   announcements [list | add <text> | remove <n> | clear | interval <minutes>|off]
                                 The messages posted on a timer.
   activity-log on|off           Log player activity (see activity_log).
