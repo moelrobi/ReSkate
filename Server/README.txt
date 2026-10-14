@@ -584,12 +584,14 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 (1-20 m, default 3) of a hider for a second has
                                 found them, and the hider seeks from then on.
                                 The last hider wins, or every hider still hidden
-                                when the time is up or the seekers have left.
+                                when the time is up. When the last seeker leaves,
+                                a random hider seeks instead (two or more left).
                                 Players not in the round see everyone. A new
                                 map ends the round. Logged as "[hns] started:
                                 ...", "[hns] seek phase", "[hns] <seeker> (<id>)
                                 found <hider> (<id>) in 63.2 s", "[hns] <name>
-                                (<id>) left", "[hns] ended: <names> win" or
+                                (<id>) left", "[hns] <name> (<id>) seeks now:
+                                the seekers left", "[hns] ended: <names> win" or
                                 "[hns] ended: nobody wins".
   hns-found <player>            The hider is found (seek phase): "[hns] <name>
                                 (<id>) found by <who>".

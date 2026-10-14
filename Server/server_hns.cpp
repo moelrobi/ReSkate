@@ -175,6 +175,19 @@ void Host::tick_hns() {
         log_("[hns] " + round.names[it->first] + " (" + std::to_string(it->first) + ") left");
         it = round.roles.erase(it);
     }
+    // The last seeker gone, two or more hiders still hidden: one of them seeks, and the round goes on.
+    std::vector<std::uint64_t> left_hiders;
+    bool seeking{};
+    for (const auto &[id, role] : round.roles) {
+        if (role == HnsRole::seeker) seeking = true;
+        if (role == HnsRole::hider) left_hiders.push_back(id);
+    }
+    if (!seeking && left_hiders.size() >= 2) {
+        const auto id = left_hiders[now_ % left_hiders.size()]; // the clock in microseconds: a fair enough draw
+        round.roles[id] = HnsRole::seeker;
+        round.finds = {};
+        log_("[hns] " + round.names[id] + " (" + std::to_string(id) + ") seeks now: the seekers left");
+    }
     std::vector<std::uint64_t> found_now;
     if (round.phase == HnsPhase::hide) {
         // Seekers wait at the spot: one who has skated off is sent back, once a second at most.

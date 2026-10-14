@@ -371,6 +371,28 @@ int run() {
     check(sees(s, h1), "After hns-stop, the seeker is still not sent a hider far away");
     check(command("hns-stop") == "No hide and seek round is running.", "hns-stop without a round");
 
+    // The last seeker leaves: a hider seeks instead and the round goes on (2026-10-14: a lone seeker
+    // quit a second into the seek phase, and every hider won).
+    reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h2) + "," + id(h3) + " at 0 0 0 hide 10 seek 30");
+    check(reply.find("Hide and seek started: 1 seeker(s), 3 hider(s).") == 0, "Round with three hiders: " + reply);
+    run_for(1000000);
+    s.leave();
+    run_for(2000000);
+    check(logged("[hns] Seeker Sam (" + id(s) + ") left"), "The seeker leaving was not logged");
+    check(logged(") seeks now: the seekers left"), "No hider was made the seeker when the last seeker left");
+    check(!logged("[hns] ended: Hider One, Hider Two, Hider Three win"), "The round ended when the last seeker left");
+    check(command("hns-status").find("Hide phase") == 0, "The round did not go on without its seeker");
+    {
+        const auto status = command("hns-status");
+        const auto seekers = status.substr(status.find("Seekers: "));
+        check(seekers.find("Hider") != std::string::npos && seekers.find("Seeker Sam") == std::string::npos,
+              "The new seeker is not listed: " + status);
+    }
+    check(command("hns-stop") == "Hide and seek stopped.", "hns-stop after a new seeker");
+    s.hello(now);
+    run_for(4000000);
+    check(s.joined, "Seeker Sam did not come back");
+
     // A new map ends the round.
     reply = command("hns-start " + id(s) + " " + id(h1) + "," + id(h2) + " at 0 0 0 hide 10 seek 30");
     run_for(1000000);
