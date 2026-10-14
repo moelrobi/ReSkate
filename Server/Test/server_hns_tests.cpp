@@ -1,0 +1,127 @@
+// Hide and seek (Server/server_hns.h): reading hns-start, who may see whom, finds and how a round
+// ends. Everything here is pure; the host's part is in server_hns_host_tests.cpp.
+//
+//   dingosdk_server_hns_tests
+#include "Server/server_hns.h"
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <vector>
+
+using namespace dingosdk::server;
+namespace {
+void check(bool ok, const std::string &message) {
+    if (ok) return;
+    std::cerr << message << '\n';
+    std::exit(1);
+}
+bool refused(std::string_view argument) {
+    HnsStart s;
+    return !parse_hns_start(argument, s).empty();
+}
+using Ids = std::vector<std::uint64_t>;
+using Pairs = std::vector<std::pair<std::uint64_t, std::uint64_t>>;
+} // namespace
+
+int main() {
+    // hns-start <seekers> <hiders> at <x y z|player> [hide|seek|reveal|find|hold <n>]...
+    HnsStart s;
+    check(parse_hns_start("1,2 3,4 at 1 2 3", s).empty(), "seekers, hiders and a spot");
+    check(s.seekers == Ids{1, 2} && s.hiders == Ids{3, 4}, "the two lists, in order");
+    check(s.at && (*s.at)[0] == 1.f && (*s.at)[1] == 2.f && (*s.at)[2] == 3.f && s.at_player.empty(), "the spot");
+    check(s.settings.hide_s == 60 && s.settings.seek_s == 300 && s.settings.reveal == 25.f && s.settings.find == 3.f &&
+              s.settings.hold == 15.f,
+          "the defaults: hide 60 s, seek 300 s, reveal 25 m, find 3 m, hold 15 m");
+    s = {};
+    check(parse_hns_start("1 2,3 at Bob hide 30 seek 120 reveal 40 find 2.5 hold 10", s).empty(), "a player as the spot, and every value");
+    check(!s.at && s.at_player == "Bob", "the player named");
+    check(s.settings.hide_s == 30 && s.settings.seek_s == 120 && s.settings.reveal == 40.f && s.settings.find == 2.5f &&
+              s.settings.hold == 10.f,
+          "the values given");
+    s = {};
+    check(parse_hns_start("  1   2,3   at 76561198000000002  ", s).empty() && s.at_player == "76561198000000002",
+          "extra spaces, and a SteamID as the spot");
+    check(parse_hns_start("1 2,3 at 0 0 0 hide 10 seek 30 reveal 5 find 1 hold 5", s).empty(), "the lower limits accepted");
+    check(parse_hns_start("1 2,3 at 0 0 0 hide 600 seek 3600 reveal 200 find 20 hold 100", s).empty(), "the upper limits accepted");
+    check(refused("1 1,2 at 0 0 0"), "a seeker who is also a hider refused");
+    check(refused("1,1 2,3 at 0 0 0"), "a seeker twice refused");
+    check(refused("1 2,2 at 0 0 0"), "a hider twice refused");
+    check(refused("1 2,3"), "no spot refused");
+    check(refused("1 2,3 at"), "an empty spot refused");
+    check(refused("1 2,3 at 0 0"), "two coordinates are a player name with a space: refused");
+    check(refused("1 2,3 at 0 0 0 hide 5"), "hide 5 refused");
+    check(refused("1 2,3 at 0 0 0 seek 4000"), "seek 4000 refused");
+    check(refused("1 2,3 at 0 0 0 reveal 300"), "reveal 300 refused");
+    check(refused("1 2,3 at 0 0 0 find 0.5"), "find 0.5 refused");
+    check(refused("1 2,3 at 0 0 0 hold 200"), "hold 200 refused");
+    check(refused("1 2,3 at 0 0 0 hide"), "a setting without a value refused");
+    check(refused("1 2,3 at 0 0 0 hide 1.5"), "seconds are whole numbers");
+    check(refused("1 2,3 at 0 0 0 speed 3"), "an unknown word refused");
+    check(refused("1 2,3 at 1e99 0 0"), "an absurd coordinate refused");
+    check(refused("1 2,3 at nan 0 0"), "NaN refused");
+    check(refused("1 x,3 at 0 0 0"), "an ID that is not a number refused");
+    check(refused("1 2,,3 at 0 0 0"), "an empty ID refused");
+    check(refused(" 2,3 at 0 0 0"), "no hiders refused (the spot is not a list)");
+    std::string many;
+    for (unsigned i = 2; i <= 65; ++i) many += (i > 2 ? "," : "") + std::to_string(i);
+    check(refused("1 " + many + " at 0 0 0"), "65 players refused");
+    many.resize(many.rfind(','));
+    check(!refused("1 " + many + " at 0 0 0"), "64 players accepted");
+
+    // Who may see whom: only a hider is ever kept from a seeker.
+    using P = HnsPhase;
+    using R = HnsRole;
+    const auto near = std::optional<float>(24.f * 24.f), far = std::optional<float>(26.f * 26.f), stale = std::optional<float>();
+    for (const auto phase : {P::off, P::hide, P::seek})
+        for (const auto source : {R::none, R::seeker, R::hider})
+            for (const auto to : {R::none, R::seeker, R::hider})
+                for (const auto distance : {near, far, stale}) {
+                    const bool hidden = hns_hidden(phase, source, to, distance, 25.f);
+                    const bool want = phase != P::off && source == R::hider && to == R::seeker &&
+                                      (phase == P::hide || !distance || *distance > 25.f * 25.f);
+                    check(hidden == want, "hns_hidden, phase " + std::to_string(int(phase)) + " source " + std::to_string(int(source)) +
+                                              " to " + std::to_string(int(to)) + ": " + (hidden ? "hidden" : "shown"));
+                }
+    check(!hns_hidden(P::seek, R::hider, R::seeker, near, 25.f), "a hider 24 m from a seeker is seen");
+    check(hns_hidden(P::seek, R::hider, R::seeker, far, 25.f), "a hider 26 m from a seeker is not");
+    check(hns_hidden(P::seek, R::hider, R::seeker, stale, 25.f), "without fresh positions a hider stays hidden");
+    check(hns_hidden(P::hide, R::hider, R::seeker, std::optional<float>(1.f), 25.f), "while hiding, not even at 1 m");
+
+    // Finds: within `find` for a whole second.
+    HnsFinds finds;
+    const std::uint64_t second = 1000000;
+    const std::vector<HnsPos> seeker{{1, {0, 0, 0}}}, hider_near{{2, {2.9f, 0, 0}}}, hider_out{{2, {3.5f, 0, 0}}};
+    check(finds.step(0, seeker, hider_near, 3.f).empty(), "not found the moment they are near");
+    check(finds.step(9 * second / 10, seeker, hider_near, 3.f).empty(), "not found at 0.9 s");
+    check(finds.step(second, seeker, hider_near, 3.f) == Pairs{{1, 2}}, "found at 1 s");
+    HnsFinds again;
+    check(again.step(0, seeker, hider_near, 3.f).empty(), "near from 0 s");
+    check(again.step(second / 2, seeker, hider_out, 3.f).empty(), "out at 0.5 s");
+    check(again.step(second, seeker, hider_near, 3.f).empty(), "back at 1 s: the second starts over");
+    check(again.step(2 * second - 1, seeker, hider_near, 3.f).empty(), "not yet at 1.999999 s");
+    check(again.step(2 * second, seeker, hider_near, 3.f) == Pairs{{1, 2}}, "found a whole second after coming back");
+    HnsFinds two;
+    const std::vector<HnsPos> seekers{{7, {1, 0, 0}}, {5, {-1, 0, 0}}}, hider{{2, {0, 0, 0}}};
+    two.step(0, seekers, hider, 3.f);
+    check(two.step(second, seekers, hider, 3.f) == Pairs{{5, 2}}, "two seekers at one hider: one find, the smaller ID's");
+    HnsFinds height;
+    const std::vector<HnsPos> above{{2, {0, 2.5f, 2.5f}}};
+    height.step(0, seeker, above, 3.f);
+    check(height.step(second, seeker, above, 3.f).empty(), "3.5 m away diagonally is not within 3 m");
+
+    // How a round ends.
+    using E = HnsEnd;
+    const auto ends = [](std::size_t seekers, Ids left, Ids found, bool time_up, E end, Ids winners) {
+        const auto o = hns_outcome(seekers, left, found, time_up);
+        return o.end == end && o.winners == winners;
+    };
+    check(ends(1, {10, 11}, {}, false, E::none, {}), "two hiders and a seeker: the round goes on");
+    check(ends(1, {10}, {}, false, E::last_hider, {10}), "one hider left: they win");
+    check(ends(3, {}, {10, 11}, false, E::last_hider, {10, 11}), "the last two found together: both win");
+    check(ends(3, {}, {}, false, E::no_hiders, {}), "every hider left: nobody wins");
+    check(ends(0, {10, 11}, {}, false, E::no_seekers, {10, 11}), "every seeker left: the hiders win");
+    check(ends(1, {10, 11}, {}, true, E::time_up, {10, 11}), "time is up: every hider left wins");
+    check(ends(2, {}, {10}, false, E::last_hider, {10}), "found in the tick the last other hider left: the one found wins");
+    check(ends(1, {10}, {11}, true, E::last_hider, {10}), "one hider left and time up together: the last hider wins");
+    return 0;
+}
