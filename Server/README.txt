@@ -593,7 +593,8 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 and one outside for out seconds in a row (10-600,
                                 default 60; 0: never) is out of the round. Back
                                 in counts 5 m inside the edge.
-                                Players not in the round see everyone. A new
+                                Hiders never see other hiders. Players not in
+                                the round see everyone. A new
                                 map ends the round. Logged as "[hns] started:
                                 ...", "[hns] seek phase", "[hns] <seeker> (<id>)
                                 found <hider> (<id>) in 63.2 s", "[hns] <name>

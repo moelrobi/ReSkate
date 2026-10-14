@@ -139,11 +139,14 @@ inline std::string parse_hns_start(std::string_view argument, HnsStart &out) {
 }
 
 // Whether a packet of a skater whose role is `source` must not reach a player whose role is
-// `recipient`. distance2: the square of the distance between them, none when either position is stale.
-// outside: the hider is outside the play area, where, seeking, every seeker sees them.
+// `recipient`: a hider never reaches another hider, and a seeker only while seeking, within reveal.
+// distance2: the square of the distance between them, none when either position is stale. outside:
+// the hider is outside the play area, where, seeking, every seeker sees them.
 inline bool hns_hidden(HnsPhase phase, HnsRole source, HnsRole recipient, std::optional<float> distance2, float reveal,
                        bool outside = false) {
-    if (phase == HnsPhase::off || source != HnsRole::hider || recipient != HnsRole::seeker) return false;
+    if (phase == HnsPhase::off || source != HnsRole::hider) return false;
+    if (recipient == HnsRole::hider) return true; // hiders never see each other: no following to the good spots
+    if (recipient != HnsRole::seeker) return false;
     if (phase == HnsPhase::hide) return true;
     if (outside) return false;
     return !distance2 || *distance2 > reveal * reveal;

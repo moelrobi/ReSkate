@@ -289,7 +289,7 @@ int run() {
     check(sees(h1, s), "A hider is not sent the seeker");
     check(sees(x, h1) && sees(x, s), "A player outside the round is not sent everyone");
     check(sees(s, x) && sees(h1, x), "The players of the round are not sent a player outside it");
-    check(sees(h1, h2), "A hider is not sent another hider");
+    check(!sees(h1, h2), "A hider is sent another hider");
 
     // A seeker who leaves the spot while hiding is sent back, once a second at most.
     s.teleports.clear();

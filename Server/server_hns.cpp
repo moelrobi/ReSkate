@@ -39,7 +39,7 @@ bool Host::hns_hides(std::uint64_t source, std::uint64_t recipient) const {
         return found == hns_.roles.end() ? HnsRole::none : found->second;
     };
     const auto from = role(source), to = role(recipient);
-    if (from != HnsRole::hider || to != HnsRole::seeker) return false;
+    if (from != HnsRole::hider || to == HnsRole::none) return false;
     std::optional<float> distance2;
     const auto *a = guests_.contains(source) ? guests_.at(source).get() : nullptr;
     const auto *b = guests_.contains(recipient) ? guests_.at(recipient).get() : nullptr;

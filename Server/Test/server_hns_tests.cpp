@@ -81,7 +81,8 @@ int main() {
     many.resize(many.rfind(','));
     check(!refused("1 " + many + " at 0 0 0"), "64 players accepted");
 
-    // Who may see whom: only a hider is ever kept from a seeker.
+    // Who may see whom: a hider is kept from the seekers (beyond reveal, and while hiding) and from the
+    // other hiders, always (2026-10-14: hiders could follow each other to the good spots).
     using P = HnsPhase;
     using R = HnsRole;
     const auto near = std::optional<float>(24.f * 24.f), far = std::optional<float>(26.f * 26.f), stale = std::optional<float>();
@@ -90,8 +91,9 @@ int main() {
             for (const auto to : {R::none, R::seeker, R::hider})
                 for (const auto distance : {near, far, stale}) {
                     const bool hidden = hns_hidden(phase, source, to, distance, 25.f);
-                    const bool want = phase != P::off && source == R::hider && to == R::seeker &&
-                                      (phase == P::hide || !distance || *distance > 25.f * 25.f);
+                    const bool want = phase != P::off && source == R::hider &&
+                                      (to == R::hider ||
+                                       (to == R::seeker && (phase == P::hide || !distance || *distance > 25.f * 25.f)));
                     check(hidden == want, "hns_hidden, phase " + std::to_string(int(phase)) + " source " + std::to_string(int(source)) +
                                               " to " + std::to_string(int(to)) + ": " + (hidden ? "hidden" : "shown"));
                 }
