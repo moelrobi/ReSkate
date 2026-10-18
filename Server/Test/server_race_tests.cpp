@@ -259,6 +259,19 @@ int main() {
           "the countdown's seconds round up");
     check(race_countdown_left(10000000, 10000000) == 0 && race_countdown_left(10000000, 12000000) == 0, "0 at and after GO");
     check(race_countdown_card(5) == "5" && race_countdown_card(1) == "1" && race_countdown_card(0) == "GO!", "the cards");
+    // ... countdown <seconds> go <text>: the GO card's text, to the end of the line
+    check(parse_race_start("1 timeout 300 false-start 5 countdown 5 go :pog1: GO GO GO! First to the finish line wins.", s).empty() &&
+              s.countdown == 5 && s.timeout == 300 && s.false_start == 5u && s.go == ":pog1: GO GO GO! First to the finish line wins.",
+          "go takes the rest of the line, spaces included");
+    check(parse_race_start("1 countdown 3 GO  timeout 60  ", s).empty() && s.go == "timeout 60" && s.timeout == default_race_timeout,
+          "after go every word is text");
+    check(!parse_race_start("1 countdown 3 go", s).empty() && !parse_race_start("1 countdown 3 go   ", s).empty(), "go without text refused");
+    check(!parse_race_start("1 go Hi", s).empty() && !parse_race_start("1 timeout 60 go Hi", s).empty(), "go without countdown refused");
+    check(parse_race_start("1 countdown 5", s).empty() && s.go.empty(), "without go: no text");
+    check(race_countdown_card(0, ":pog1: GO GO GO!") == ":pog1: GO GO GO!" && race_countdown_card(0, "") == "GO!" &&
+              race_countdown_card(2, "Go!") == "2",
+          "the GO card's text, only at GO");
+    check(race_start_usage.find("go <text>") != std::string_view::npos, "the usage names go <text>");
     {
         // Ticks at an uneven rate: each number once, in order, then GO.
         std::vector<std::string> cards;

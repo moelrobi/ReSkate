@@ -41,7 +41,7 @@ constexpr float max_race_move = 50.f;
 constexpr std::uint64_t race_settle_margin_ms = 1000;
 constexpr std::string_view race_zone_usage = "<x y z> <radius 1-200>";
 constexpr std::string_view race_start_usage =
-    "race-start <SteamID64,SteamID64,...> [timeout <seconds 1-3600>] [false-start dnf|<seconds 1-60>] [countdown <seconds 1-10>]";
+    "race-start <SteamID64,SteamID64,...> [timeout <seconds 1-3600>] [false-start dnf|<seconds 1-60>] [countdown <seconds 1-10> [go <text>]]";
 constexpr std::string_view race_hold_usage =
     "race-hold <SteamID64> <x y z> [<SteamID64> <x y z> ...] [radius <m 1-200>] [drop <m 1-200>] | race-hold clear";
 
@@ -97,9 +97,10 @@ struct RaceStart {
     // What a false start costs (race-arm's start zone): 0 a DNF, else seconds added; none: no check.
     std::optional<unsigned> false_start;
     unsigned countdown{}; // seconds the server counts down before GO; 0: the race starts at once
+    std::string go;       // the GO card's text with a countdown; empty: "GO!"
 };
-// "<ids> [timeout <seconds>] [false-start dnf|<seconds>] [countdown <seconds>]", options in any
-// order, or why it is not one.
+// "<ids> [timeout <seconds>] [false-start dnf|<seconds>] [countdown <seconds>] [go <text>]",
+// options in any order but go last (its text runs to the end), or why it is not one.
 inline std::string parse_race_start(std::string_view argument, RaceStart &out) {
     out = {};
     auto [ids, rest] = split(argument);
@@ -110,6 +111,11 @@ inline std::string parse_race_start(std::string_view argument, RaceStart &out) {
         const auto [value, remaining] = split(after);
         const auto option = lower(word);
         const auto seconds = number(value);
+        if (option == "go") {
+            out.go = std::string(trim(after));
+            if (out.go.empty()) return std::string(race_start_usage) + ".";
+            break;
+        }
         if (option == "timeout" && !timeout && seconds && *seconds && *seconds <= max_race_timeout) {
             out.timeout = static_cast<unsigned>(*seconds);
             timeout = true;
@@ -124,6 +130,7 @@ inline std::string parse_race_start(std::string_view argument, RaceStart &out) {
         }
         rest = remaining;
     }
+    if (!out.go.empty() && !out.countdown) return "go <text> is the countdown's GO card: it needs countdown <seconds>.";
     return {};
 }
 // Inside or on the sphere. A position that is not a number is never inside.
@@ -431,7 +438,9 @@ inline std::string race_pull_line(std::string_view name, std::uint64_t id, float
 inline unsigned race_countdown_left(std::uint64_t go, std::uint64_t now) noexcept {
     return now >= go ? 0 : static_cast<unsigned>((go - now + 999999) / 1000000);
 }
-inline std::string race_countdown_card(unsigned left) { return left ? std::to_string(left) : "GO!"; }
+inline std::string race_countdown_card(unsigned left, std::string_view go = {}) {
+    return left ? std::to_string(left) : go.empty() ? "GO!" : std::string(go);
+}
 // The race state the host keeps: the course on this map, and the running race.
 struct Race {
     std::optional<RaceZone> finish;

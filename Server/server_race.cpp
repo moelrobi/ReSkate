@@ -166,6 +166,7 @@ std::string Host::race_command(std::string_view name, std::string_view argument,
     if (!race.finish) return "Set the finish first: race-finish " + std::string(race_zone_usage);
     RaceStart start;
     if (auto why = parse_race_start(argument, start); !why.empty()) return why;
+    if (!start.go.empty() && clean_chat_text(start.go).empty()) return "go <text>: nothing of it can be shown on a card.";
     std::vector<Racer> racers;
     std::vector<std::optional<std::array<float, 3>>> positions; // where each racer is at the start
     std::string skipped;
@@ -270,7 +271,7 @@ void Host::tick_race() {
         }
         const auto start = *race.pending;
         begin_race(start); // the clock starts with the GO card
-        announce(race_countdown_card(0));
+        announce(race_countdown_card(0, start.go));
     }
     if (!race.running) return;
     const auto elapsed = (now_ - race.started) / 1000;

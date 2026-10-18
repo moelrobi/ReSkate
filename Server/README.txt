@@ -711,7 +711,7 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 before the false-start check), race-stop, a map
                                 change, and for a racer who leaves.
   race-hold [clear]             List the holds, or drop them all.
-  race-start <SteamID64,SteamID64,...> [timeout <seconds>] [false-start dnf|<seconds>] [countdown <seconds>]
+  race-start <SteamID64,SteamID64,...> [timeout <seconds>] [false-start dnf|<seconds>] [countdown <seconds> [go <text>]]
                                 Time those players (at most 64, in the world) from
                                 now to the finish; the race ends when all finished
                                 or left, or after the timeout (default 300 s, at
@@ -725,6 +725,9 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 with the "[race] started" line then. race-stop
                                 before GO logs "[race] countdown stopped by <name>",
                                 a map change "[race] countdown dropped: the map changed".
+                                go <text> (last, with countdown): the GO card shows
+                                that text instead of "GO!", cleaned and cut as by
+                                announce (emote codes like :pog1: work).
                                 false-start: with a start zone armed, a racer
                                 outside it now has a false start, logged as
                                 "[race] <name> (<SteamID64>) false start: 12.3 m from the start".
