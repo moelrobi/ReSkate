@@ -1,8 +1,11 @@
 #include "mod_catalog.h"
+#include "Engine/Core/Platform/path_text.h"
+#include "builtin_packs.h"
 
 #include "mod_merge.h"
 #include "native_db.h"
 #include "Engine/Core/Json/json.h"
+#include "Engine/Game/Build/supported_build.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -120,6 +123,46 @@ bool deck_before(const std::string& a, const std::string& b) {
     };
     return place(a) != place(b) ? place(a) < place(b) : a < b;
 }
+// The decks a pack holds beside its own (mod_catalog.h), by name, in the menus' order.
+std::vector<std::pair<std::string, fs::path>> decks_inside(const fs::path& mod) {
+    std::vector<std::pair<std::string, fs::path>> found;
+    std::error_code error;
+    for (fs::directory_iterator at(mod / L"decks", error), end; !error && at != end; at.increment(error)) {
+        if (!at->is_directory(error) || !fs::is_regular_file(at->path() / L"layout.toc", error)) continue;
+        auto name = lower(path_utf8(at->path().filename()));
+        if (deck_name(name)) found.emplace_back(std::move(name), at->path());
+    }
+    std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return deck_before(a.first, b.first); });
+    return found;
+}
+// Every mod folder a deck can come from: those in the Mods folder (but one a built-in pack
+// replaces), then the built-in packs (builtin_packs.h), which the merge also puts after them.
+std::vector<fs::path> deck_mod_folders() {
+    std::vector<fs::path> found;
+    const auto mods = engine_data_root() / L"Mods";
+    std::error_code error;
+    for (fs::directory_iterator at(mods, error), end; !error && at != end; at.increment(error))
+        if (at->is_directory(error) && !kept_by_reskate(mods, path_utf8(at->path().filename()))) found.push_back(at->path());
+    error.clear();
+    for (fs::directory_iterator at(mods / std::string(builtin_folder), error), end; !error && at != end; at.increment(error))
+        if (at->is_directory(error) && at->path().filename().wstring().find(L".unpacking-") == std::wstring::npos)
+            found.push_back(at->path());
+    for (auto& official : official_packs(mods)) found.push_back(std::move(official.directory));
+    return found;
+}
+// Every deck in the Mods folder with the folder of the mod that brings it, in the menus' order,
+// whatever mods.json says of that mod: the decks inside a pack, or else the one a folder is named for.
+std::vector<std::pair<std::string, fs::path>> installed_decks() {
+    std::vector<std::pair<std::string, fs::path>> decks;
+    for (const auto& folder : deck_mod_folders()) {
+        auto inside = decks_inside(folder);
+        for (auto& one : inside) decks.emplace_back(std::move(one.first), folder);
+        if (!inside.empty()) continue;
+        if (auto deck = board_break_deck_of(path_utf8(folder.filename())); !deck.empty()) decks.emplace_back(std::move(deck), folder);
+    }
+    std::stable_sort(decks.begin(), decks.end(), [](const auto& a, const auto& b) { return deck_before(a.first, b.first); });
+    return decks;
+}
 // The choice made in this run, and what the last live apply gave the game (none since launch: the
 // launch's catalogue says).
 struct BoardBreakApplied {
@@ -133,12 +176,21 @@ std::optional<BoardBreakApplied> applied_board_break;
 } // namespace
 
 std::string board_break_deck_of(std::string_view mod) {
-    // Team-Board_Break_Wide and Board_Break_Wide are both the deck "wide".
     constexpr std::string_view prefix = "board_break_";
     auto name = lower(mod);
+    // A pack's deck is listed as <pack's folder>#<deck>; no folder has a # in its name.
+    if (const auto mark = name.rfind('#'); mark != std::string::npos) {
+        name.erase(0, mark + 1);
+        return deck_name(name) ? name : std::string{};
+    }
+    // Team-Board_Break_Wide and Board_Break_Wide are both the deck "wide".
     if (const auto team = name.rfind('-'); team != std::string::npos) name.erase(0, team + 1);
     if (!name.starts_with(prefix) || !deck_name(std::string_view(name).substr(prefix.size()))) return {};
     return name.substr(prefix.size());
+}
+std::string board_break_pack_of(std::string_view mod) {
+    const auto mark = mod.rfind('#');
+    return mark == std::string_view::npos ? std::string{} : std::string(mod.substr(0, mark));
 }
 std::string wanted_board_break_deck() noexcept {
     try {
@@ -178,23 +230,28 @@ bool save_board_break_deck(std::string_view deck) noexcept {
 std::vector<std::filesystem::path> board_break_folders() noexcept {
     std::vector<fs::path> found;
     try {
-        std::vector<std::pair<std::string, fs::path>> decks;
-        std::error_code error;
-        for (fs::directory_iterator at(engine_data_root() / L"Mods", error), end; !error && at != end; at.increment(error))
-            if (at->is_directory(error))
-                if (auto deck = board_break_deck_of(at->path().filename().string()); !deck.empty()) decks.emplace_back(std::move(deck), at->path());
-        std::sort(decks.begin(), decks.end(), [](const auto& a, const auto& b) { return deck_before(a.first, b.first); });
-        for (auto& deck : decks) found.push_back(std::move(deck.second));
+        for (auto& deck : installed_decks())
+            if (std::find(found.begin(), found.end(), deck.second) == found.end()) found.push_back(std::move(deck.second));
     } catch (...) {}
     return found;
+}
+std::filesystem::path board_break_deck_folder(std::string_view deck) noexcept {
+    try {
+        const auto wanted = lower(deck);
+        for (const auto& folder : deck_mod_folders()) {
+            const auto inside = decks_inside(folder);
+            for (const auto& one : inside)
+                if (one.first == wanted) return one.second;
+            if (inside.empty() && board_break_deck_of(path_utf8(folder.filename())) == wanted) return folder;
+        }
+    } catch (...) {}
+    return {};
 }
 std::vector<std::string> installed_board_break_decks() noexcept {
     std::vector<std::string> found;
     try {
-        for (const auto& folder : board_break_folders()) {
-            auto deck = board_break_deck_of(folder.filename().string());
-            if (found.empty() || found.back() != deck) found.push_back(std::move(deck));
-        }
+        for (auto& deck : installed_decks())
+            if (found.empty() || found.back() != deck.first) found.push_back(std::move(deck.first));
     } catch (...) {}
     return found;
 }
@@ -261,7 +318,12 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
         result.issue = "The engine data root could not be resolved";
         return result;
     }
+    // Content ReSkate carries itself (builtin_packs.h), unpacked first: it makes the Mods folder
+    // when there is none, so the content loads without any mod installed.
+    std::vector<std::string> builtin_notes;
+    const auto builtin = unpack_builtin_packs(data_root / mods_folder, builtin_notes);
     auto list = scan_mods(data_root);
+    for (auto& note : builtin_notes) list.notes.push_back(std::move(note));
     result.root = std::move(list.root);
     result.present = list.present;
     if (!result.present) return result;
@@ -275,6 +337,50 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
     try {
         for (const auto& name : list.missing)
             result.notes.push_back("mods.json names a folder that is not present: " + name);
+        // A mod ReSkate keeps itself (an official mod, or one retired with it: builtin_packs.h) is
+        // left out, should the launcher not have taken it away yet: its content would load twice.
+        std::erase_if(list.entries, [&](const ModEntry& entry) {
+            if (!kept_by_reskate(data_root / mods_folder, entry.mod.name)) return false;
+            result.notes.push_back(entry.mod.name + " is an official mod ReSkate keeps itself; the copy in the Mods folder is left out");
+            return true;
+        });
+        // After every installed mod, so none of theirs is ever shadowed by it; always on. Official
+        // mods (builtin_packs.h) the same way.
+        for (const auto& pack : builtin)
+            list.entries.push_back({describe_mod(pack.directory, pack.name, result.notes), true});
+        for (const auto& pack : official_packs(data_root / mods_folder))
+            list.entries.push_back({describe_mod(pack.directory, pack.name, result.notes), true});
+        // Board Break: a deck pack holds several decks in one mod folder (mod_catalog.h). Each deck
+        // inside becomes a mod of its own for the run, listed after the pack as <folder>#<deck>, so
+        // that a pack's decks are chosen, set aside and switched like decks in folders of their own.
+        // It carries the pack's build stamp; mods.json and the mod list only know the pack. The
+        // pack's own layout is no deck here, whatever its folder is named: it is the deck a ReSkate
+        // from before deck packs breaks, and is set aside for the decks inside.
+        std::vector<std::string> packs;
+        for (std::size_t i = 0; i < list.entries.size(); ++i) {
+            auto inside = decks_inside(list.entries[i].mod.directory);
+            if (inside.empty()) continue;
+            const auto pack = list.entries[i].mod;
+            packs.push_back(pack.name);
+            const bool enabled = list.entries[i].enabled;
+            for (auto& [deck, directory] : inside) {
+                ModEntry part;
+                part.enabled = enabled;
+                part.mod.name = pack.name + "#" + deck;
+                part.mod.title = pack.title + " (" + deck + ")";
+                part.mod.author = pack.author;
+                part.mod.version = pack.version;
+                part.mod.directory = std::move(directory);
+                part.mod.provides_layout = true;
+                part.mod.studio_marker = pack.studio_marker;
+                part.mod.skate_sha256 = pack.skate_sha256;
+                part.mod.outdated = pack.outdated;
+                list.entries.insert(list.entries.begin() + static_cast<std::ptrdiff_t>(++i), std::move(part));
+            }
+        }
+        const auto deck_of = [&](const Mod& mod) {
+            return std::find(packs.begin(), packs.end(), mod.name) != packs.end() ? std::string{} : board_break_deck_of(mod.name);
+        };
         // Board Break (Extension/BoardBreak/board_break.h). The deck that can break is a mod's own
         // copy of the game's one deck model, and any mod that reshapes the deck replaces that same
         // model: the one higher in the load order has it. So the deck the player chose goes first
@@ -287,7 +393,7 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
         {
             const auto enabled_deck = [&](const std::string& deck) {
                 return std::find_if(list.entries.begin(), list.entries.end(), [&](const auto& entry) {
-                    const auto found = board_break_deck_of(entry.mod.name);
+                    const auto found = deck_of(entry.mod);
                     return entry.enabled && !found.empty() && (deck.empty() || found == deck);
                 });
             };
@@ -298,7 +404,7 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
                 std::rotate(list.entries.begin(), first, first + 1);
                 result.notes.push_back("Board Break: " + list.entries.front().mod.name + " loads first, so its deck is the one in the game");
                 for (auto entry = list.entries.begin() + 1; entry != list.entries.end(); ++entry) {
-                    if (!entry->enabled || (board_break_deck_of(entry->mod.name).empty() && !changes_the_deck(entry->mod.directory))) continue;
+                    if (!entry->enabled || (deck_of(entry->mod).empty() && !changes_the_deck(entry->mod.directory))) continue;
                     entry->enabled = false;
                     result.set_aside.push_back(entry->mod.name);
                     result.notes.push_back("Board Break: " + entry->mod.name + " brings a deck model too and is set aside for this run");
@@ -342,7 +448,8 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
         auto exclusions = read_exclusions(result.root);
         const auto sdk = sdk_identity();
         std::map<std::string, Exclusion, std::less<>> still_excluded;
-        const auto leave_out = [&](std::size_t index, std::vector<std::string> problems, const std::string& fingerprint) {
+        // `remembered`: it stays out on later launches without a retry, until its files or ReSkate change.
+        const auto leave_out = [&](std::size_t index, std::vector<std::string> problems, const std::string& fingerprint, bool remembered = true) {
             auto mod = std::move(result.mods[index]);
             result.mods.erase(result.mods.begin() + static_cast<std::ptrdiff_t>(index));
             // Level bundles decide whether a map loads at all, so their problems lead.
@@ -350,7 +457,7 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
                 return problem.find("levels/game/") != std::string::npos;
             });
             mod.problems = std::move(problems);
-            still_excluded[mod.name] = {fingerprint, sdk, mod.problems};
+            if (remembered) still_excluded[mod.name] = {fingerprint, sdk, mod.problems};
             result.excluded.push_back(std::move(mod));
         };
         for (std::size_t i = result.mods.size(); i-- > 0;) {
@@ -358,6 +465,10 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
             if (found == list.excluded.end()) continue;
             const auto& previous = exclusions.at(result.mods[i].name);
             if (sdk.empty() || previous.sdk != sdk) continue; // a new ReSkate may merge it now
+            // One left out because the game was of another build is looked at again below: the
+            // game may have been put right since (its files verified), with the mod untouched.
+            // Remembered, it stayed out for good with the game fixed (seen 2026-10-13).
+            if (!found->second.empty() && found->second.front().starts_with("made for game build ")) continue;
             result.notes.push_back("Leaving out " + result.mods[i].name +
                 ": it could not be merged cleanly before and its files have not changed since");
             leave_out(i, found->second, previous.fingerprint);
@@ -378,9 +489,13 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
             if (build.empty()) continue;
             result.notes.push_back("Leaving out " + result.mods[i].name + ": it was made for game build " + build +
                                    ", the installed game is " + game_build);
+            // (When it is the game that is of another build than ReSkate's, the mod is not what
+            // needs seeing to.)
             leave_out(i, {"made for game build " + build + ", not the installed " + game_build +
-                          "; rebuild it with ReSkate Studio for this game build"},
-                      mod_fingerprint(result.mods[i].directory));
+                          (game_build != supported_build::game_data_changelist
+                               ? "; your game files are not the version ReSkate supports: in the launcher, open Settings and press Verify game files"
+                               : "; rebuild it with ReSkate Studio for this game build")},
+                      mod_fingerprint(result.mods[i].directory), false); // (checked on every launch: the game's build can change under it)
         }
         for (std::size_t i = result.inactive.size(); i-- > 0;) {
             const auto build = made_for(result.inactive[i]);
@@ -392,7 +507,7 @@ Catalog load_catalog(const std::filesystem::path& data_root, const MergeObserver
         // Board Break's deck is the one in the game when its mod is among those that load and no mod
         // above it brings a deck model of its own.
         for (const auto& mod : result.mods) {
-            if (!(result.board_break_deck = board_break_deck_of(mod.name)).empty()) break;
+            if (!(result.board_break_deck = deck_of(mod)).empty()) break;
             if (changes_the_deck(mod.directory)) break;
         }
         // Any Mods folder gets a patch, even an empty one or one of disabled

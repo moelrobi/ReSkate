@@ -82,12 +82,14 @@ constexpr Size break_size(Place place, bool joined, float fold_depth) noexcept {
     if (place == Place::mid) return !joined || fold_depth >= 0.7f ? Size::heavy : Size::medium;
     return joined ? Size::light : Size::medium;
 }
-// How likely a slam of `force` breaks the board: always from `heavy` up, with `light` up to 60% of
-// it, rising evenly in between.
-constexpr float break_chance(float force, float heavy, float light) noexcept {
+// How likely a slam of `force` breaks the board: never up to 60% of `heavy`, always from `heavy` up,
+// rising smoothly in between. A board only breaks from a hit the player can feel was a big one.
+constexpr float break_chance(float force, float heavy) noexcept {
     if (heavy <= 0 || force >= heavy) return 1.0f;
     const auto low = 0.6f * heavy;
-    return force <= low ? light : light + (1.0f - light) * (force - low) / (heavy - low);
+    if (force <= low) return 0.0f;
+    const auto t = (force - low) / (heavy - low);
+    return t * t * (3.0f - 2.0f * t);
 }
 
 // ---- where the parts of a broken board lie ------------------------------------------------------
@@ -202,5 +204,22 @@ inline Rigid truck_bone(const Rigid& motion, Quat mount, Vec mount_at, Quat stee
     const auto facing = unit(conj(mount) * motion.facing * mount);
     const auto at = turn(conj(mount), turn(motion.facing, mount_at) + motion.at - mount_at);
     return {unit(facing * steer), turn(facing, place) + at - away};
+}
+// The trucks' baseplates. The game's own truck model has them on the deck's bone, which goes away
+// with the real deck when the board breaks, and they went with it. A deck pack's truck model has
+// each baseplate on its truck's effector instead, a bone under the truck's that no model uses:
+// wherever a piece carries the truck, its baseplate goes along. This is where that effector goes
+// so that the baseplate sits on the deck however the truck steers: the truck's own turn and place
+// taken back, its rest put in. `truck` is the truck's bone as the animation left it this frame.
+struct TruckRest {
+    Quat facing;  // the truck's bone on the deck's, at rest
+    Vec at;
+    Vec effector; // its effector on the truck's bone, at rest (not turned)
+};
+constexpr TruckRest back_truck_rest{{-0.3641458f, -0.3641458f, -0.6061335f, 0.6061335f}, {0.0005361f, -0.0183003f, -0.2344986f}, {0.0395021f, 0.0f, 0.0f}};
+constexpr TruckRest front_truck_rest{{-0.6061674f, 0.6061674f, 0.3640894f, 0.3640894f}, {0.0005361f, -0.0182917f, 0.2346680f}, {0.0395677f, 0.0f, 0.0f}};
+inline Rigid baseplate_bone(const Rigid& truck, const TruckRest& rest) noexcept {
+    const auto back = conj(truck.facing);
+    return {unit(back * rest.facing), turn(back, rest.at + turn(rest.facing, rest.effector) - truck.at)};
 }
 } // namespace dingosdk::board_break
