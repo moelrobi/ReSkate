@@ -101,24 +101,26 @@ int main() {
     check(race_step(next, overlapping, finish, {90, 0, 0}), "passing it inside the finish finishes");
 
     // Times, lines and results.
-    check(race_seconds(48250) == "48.3", "48250 ms is 48.3 s");
-    check(race_seconds(51000) == "51.0", "51000 ms is 51.0 s");
-    check(race_seconds(0) == "0.0", "0 ms");
-    check(race_seconds(49) == "0.0" && race_seconds(50) == "0.1", "rounding at the twentieth");
-    check(race_seconds(59999) == "60.0", "rounding up to the minute");
-    check(race_seconds(3600000) == "3600.0", "an hour");
+    check(race_seconds(48265) == "48.27", "48265 ms is 48.27 s");
+    check(race_seconds(48250) == "48.25", "48250 ms is 48.25 s");
+    check(race_seconds(48050) == "48.05", "a hundredth below ten keeps its zero");
+    check(race_seconds(51000) == "51.00", "51000 ms is 51.00 s");
+    check(race_seconds(0) == "0.00", "0 ms");
+    check(race_seconds(4) == "0.00" && race_seconds(5) == "0.01", "rounding at the half hundredth");
+    check(race_seconds(59995) == "60.00", "rounding up to the minute");
+    check(race_seconds(3600000) == "3600.00", "an hour");
     check(race_finish_line(finished(76561198000000001, "Kush", 1, 48300)) ==
-              "[race] Kush (76561198000000001) finished 1 in 48.3 s",
+              "[race] Kush (76561198000000001) finished 1 in 48.30 s",
           "the finish line");
-    check(race_finish_line(finished(1, "Bad\nName\r", 2, 1000)) == "[race] Bad Name  (1) finished 2 in 1.0 s", "a name on one line");
+    check(race_finish_line(finished(1, "Bad\nName\r", 2, 1000)) == "[race] Bad Name  (1) finished 2 in 1.00 s", "a name on one line");
     std::vector<Racer> racers{Racer{.id = 1, .name = "Carl"}, finished(2, "Bea", 2, 51000), Racer{.id = 3, .name = "Dee"},
                               finished(4, "Al", 1, 48300)};
     racers[2].left = true;
-    check(race_results_line(racers) == "[race] ended: 1. Al 48.3 s, 2. Bea 51.0 s, Carl DNF, Dee DNF",
+    check(race_results_line(racers) == "[race] ended: 1. Al 48.30 s, 2. Bea 51.00 s, Carl DNF, Dee DNF",
           "finishers by place, then DNF as they started");
     // Two finished in one tick: same time, place decides.
     std::vector<Racer> tie{finished(1, "B", 2, 5000), finished(2, "A", 1, 5000)};
-    check(race_results_line(tie) == "[race] ended: 1. A 5.0 s, 2. B 5.0 s", "a tie by place");
+    check(race_results_line(tie) == "[race] ended: 1. A 5.00 s, 2. B 5.00 s", "a tie by place");
     check(race_results_line({Racer{.id = 1, .name = "X"}}) == "[race] ended: X DNF", "nobody finished");
     check(race_results_line({}) == "[race] ended: nobody raced", "no racers");
     check(race_results_line({finished(1, "a\nb", 1, 1)}).find('\n') == std::string::npos, "never more than one line");
@@ -180,9 +182,9 @@ int main() {
     due = race_settle(field, placed, 53000, false);
     check(due.size() == 1 && due[0] == &field[1] && field[1].place == 2, "the penalised one once the clock reaches 53 s");
     const std::regex finish_format(R"(^\[race\] (.+) \((\d+)\) finished (\d+) in ([\d.]+) s$)");
-    check(race_finish_line(field[1]) == "[race] B (2) finished 2 in 53.0 s" && std::regex_match(race_finish_line(field[1]), finish_format),
+    check(race_finish_line(field[1]) == "[race] B (2) finished 2 in 53.00 s" && std::regex_match(race_finish_line(field[1]), finish_format),
           "a penalised finish line: the penalised time and place, no suffix");
-    check(race_results_line(field) == "[race] ended: 1. A 50.0 s, 2. B 53.0 s (+5 s false start), C DNF", "results with a penalty");
+    check(race_results_line(field) == "[race] ended: 1. A 50.00 s, 2. B 53.00 s (+5 s false start), C DNF", "results with a penalty");
     // The race ends before the clock reaches a penalised time: placed then, in time order, ties by crossing.
     field = three();
     placed = 0;
@@ -208,7 +210,7 @@ int main() {
     field[0].ms = 40000;
     check(race_settle(field, placed, 99000, true).size() == 1 && !field[2].place && field[0].place == 1, "a dnf false start is not placed");
     field[1].left = true;
-    check(race_results_line(field) == "[race] ended: 1. A 40.0 s, B DNF, C DNF (false start)", "results with a dnf false start");
+    check(race_results_line(field) == "[race] ended: 1. A 40.00 s, B DNF, C DNF (false start)", "results with a dnf false start");
     // A penalised racer who never finishes is a DNF, still marked.
     field = three();
     field[0].false_start = true;
@@ -220,26 +222,203 @@ int main() {
     const std::vector<RaceZone> course{{{0, 0, 0}, 5}, {{50, 0, 0}, 5}};
     std::size_t from = runner.next;
     check(!race_step(runner.next, course, finish, {1, 0, 0}) &&
-              race_checkpoint_lines(runner, from, course.size(), 12345) ==
-                  std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 1/2 in 12.3 s"},
+              race_checkpoint_lines(runner, from, course.size(), {12345}) ==
+                  std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 1/2 in 12.35 s"},
           "one checkpoint, one line");
     from = runner.next;
-    check(!race_step(runner.next, course, finish, {1, 0, 0}) && race_checkpoint_lines(runner, from, course.size(), 13000).empty(),
+    check(!race_step(runner.next, course, finish, {1, 0, 0}) && race_checkpoint_lines(runner, from, course.size(), {13000}).empty(),
           "staying in it logs nothing");
-    check(!race_step(runner.next, course, finish, {50, 0, 0}) && race_checkpoint_lines(runner, from, 2, 20000) ==
-              std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 2/2 in 20.0 s"},
+    check(!race_step(runner.next, course, finish, {50, 0, 0}) && race_checkpoint_lines(runner, from, 2, {20000}) ==
+              std::vector<std::string>{"[race] Kush (76561198000000001) checkpoint 2/2 in 20.00 s"},
           "resuming logs only the next one");
     Racer quick{.id = 9, .name = "Bad\nName"};
     const std::vector<RaceZone> stacked{{{0, 0, 0}, 5}, {{2, 0, 0}, 5}, {{90, 0, 0}, 1}};
     from = quick.next;
     race_step(quick.next, stacked, finish, {1, 0, 0});
-    check(race_checkpoint_lines(quick, from, stacked.size(), 4049) ==
-              std::vector<std::string>{"[race] Bad Name (9) checkpoint 1/3 in 4.0 s", "[race] Bad Name (9) checkpoint 2/3 in 4.0 s"},
+    check(race_checkpoint_lines(quick, from, stacked.size(), {4049, 4051}) ==
+              std::vector<std::string>{"[race] Bad Name (9) checkpoint 1/3 in 4.05 s", "[race] Bad Name (9) checkpoint 2/3 in 4.05 s"},
           "overlapping checkpoints: a line each, in order, names on one line");
     from = quick.next;
     check(race_step(quick.next, stacked, finish, {90, 0, 0}) &&
-              race_checkpoint_lines(quick, from, stacked.size(), 9000) ==
-                  std::vector<std::string>{"[race] Bad Name (9) checkpoint 3/3 in 9.0 s"},
+              race_checkpoint_lines(quick, from, stacked.size(), {9000}) ==
+                  std::vector<std::string>{"[race] Bad Name (9) checkpoint 3/3 in 9.00 s"},
           "the last checkpoint is logged in the tick it finishes");
+
+    // race-start ... countdown <seconds>
+    check(parse_race_start("1 countdown 5", s).empty() && s.countdown == 5, "a countdown");
+    check(parse_race_start("1 countdown 1 timeout 60", s).empty() && s.countdown == 1 && s.timeout == 60, "countdown 1, then a timeout");
+    check(parse_race_start("1 false-start dnf COUNTDOWN 10", s).empty() && s.countdown == 10 && s.false_start == 0u, "countdown 10, any case");
+    check(!parse_race_start("1 countdown 0", s).empty(), "countdown 0 refused");
+    check(!parse_race_start("1 countdown 11", s).empty(), "countdown 11 refused");
+    check(!parse_race_start("1 countdown", s).empty(), "countdown alone refused");
+    check(!parse_race_start("1 countdown 3 countdown 4", s).empty(), "countdown twice refused");
+    check(parse_race_start("1,2 timeout 60 false-start 5", s).empty() && !s.countdown && s.timeout == 60 && s.false_start == 5u,
+          "without countdown: as before, no countdown");
+    check(race_countdown_left(10000000, 5000000) == 5 && race_countdown_left(10000000, 5000001) == 5 &&
+              race_countdown_left(10000000, 9000000) == 1 && race_countdown_left(10000000, 9999999) == 1,
+          "the countdown's seconds round up");
+    check(race_countdown_left(10000000, 10000000) == 0 && race_countdown_left(10000000, 12000000) == 0, "0 at and after GO");
+    check(race_countdown_card(5) == "5" && race_countdown_card(1) == "1" && race_countdown_card(0) == "GO!", "the cards");
+    {
+        // Ticks at an uneven rate: each number once, in order, then GO.
+        std::vector<std::string> cards;
+        unsigned shown{};
+        for (std::uint64_t now = 0; now <= 3100000; now += 70000) {
+            const auto left = race_countdown_left(3000000, now);
+            if (shown && left >= shown) continue;
+            shown = left;
+            cards.push_back(race_countdown_card(left));
+            if (!left) break;
+        }
+        check(cards == std::vector<std::string>{"3", "2", "1", "GO!"}, "3, 2, 1, GO! once each");
+    }
+
+    // race-hold <SteamID64> <x y z> ... [radius <m>] [drop <m>]
+    std::vector<RaceHold> holds;
+    check(parse_race_hold("76561198000000001 10 2 -3.5", holds).empty() && holds.size() == 1 && holds[0].id == 76561198000000001 &&
+              holds[0].spot == std::array<float, 3>{10, 2, -3.5f} && holds[0].radius == 3.f && holds[0].drop == 4.f && !holds[0].teleported,
+          "one racer, the defaults");
+    check(parse_race_hold("1 0 0 0 2 5 5 5 radius 6 drop 10", holds).empty() && holds.size() == 2 && holds[1].spot[0] == 5.f &&
+              holds[0].radius == 6.f && holds[1].radius == 6.f && holds[0].drop == 10.f && holds[1].drop == 10.f,
+          "two racers, radius and drop for both");
+    check(parse_race_hold("1 0 0 0 DROP 2", holds).empty() && holds[0].drop == 2.f && holds[0].radius == 3.f, "drop alone, any case");
+    check(parse_race_hold("1 0 0 0 2 1 1 1 1 9 9 9", holds).empty() && holds.size() == 2 && holds[1].id == 1 && holds[1].spot[0] == 9.f,
+          "a racer named twice is held where named last");
+    check(!parse_race_hold("", holds).empty(), "empty refused");
+    check(!parse_race_hold("1 0 0", holds).empty(), "two coordinates refused");
+    check(!parse_race_hold("1 0 0 0 2", holds).empty(), "an id without a spot refused");
+    check(!parse_race_hold("Bob 0 0 0", holds).empty(), "a name refused");
+    check(!parse_race_hold("0 0 0 0", holds).empty(), "id 0 refused");
+    check(!parse_race_hold("1 0 nan 0", holds).empty() && !parse_race_hold("1 0 1e9 0", holds).empty(), "bad coordinates refused");
+    check(!parse_race_hold("1 0 0 0 radius 0.5", holds).empty() && !parse_race_hold("1 0 0 0 drop 201", holds).empty(),
+          "radius and drop are 1 to 200 m");
+    check(!parse_race_hold("1 0 0 0 radius 3 radius 4", holds).empty(), "radius twice refused");
+    check(!parse_race_hold("1 0 0 0 radius 3 2 0 0 0", holds).empty(), "a racer after the options refused");
+    check(!parse_race_hold("radius 3", holds).empty(), "options without a racer refused");
+    {
+        std::string many;
+        for (unsigned i = 1; i <= 65; ++i) many += std::to_string(i) + " 0 0 0 ";
+        check(!parse_race_hold(many, holds).empty(), "65 racers in one call refused");
+        std::vector<RaceHold> held, one;
+        for (unsigned i = 1; i <= 64; ++i) {
+            check(parse_race_hold(std::to_string(i) + " 0 0 0", one).empty() && merge_race_holds(held, one), "one call per racer");
+        }
+        check(held.size() == 64, "64 held");
+        check(parse_race_hold("7 1 1 1", one).empty() && merge_race_holds(held, one) && held.size() == 64 && held.back().id == 7,
+              "holding one again replaces their hold");
+        check(parse_race_hold("65 0 0 0", one).empty() && !merge_race_holds(held, one) && held.size() == 64, "a 65th refused, nothing changed");
+    }
+    // Pulled back: across more than radius, or more than drop below; grace and repeat.
+    RaceHold hold{.id = 5, .spot = {100, 50, 0}};
+    check(!race_hold_off(hold, {150, 50, 0}, 9000000, 9000000), "never before the first teleport");
+    hold.teleported = 1000000;
+    const std::uint64_t later = 1000000 + race_hold_repeat_us;
+    check(!race_hold_off(hold, {150, 50, 0}, 1500000, later), "a pose from within the grace time is not counted");
+    check(!race_hold_off(hold, {150, 50, 0}, 2100000, 2100000), "at most one pull per repeat time");
+    const auto off = race_hold_off(hold, {104, 50, 3}, 2000000, later);
+    check(off && *off == 5.f, "off across: the distance from the spot");
+    check(!race_hold_off(hold, {102, 50, 2}, 2000000, later), "within the radius: held");
+    check(!race_hold_off(hold, {102.9f, 70, 0}, 2000000, later), "above the spot (they land 2 m up, or jump): held");
+    check(!race_hold_off(hold, {100, 46, 0}, 2000000, later), "4 m below: still held (drop 4)");
+    const auto fell = race_hold_off(hold, {100, 45, 0}, 2000000, later);
+    check(fell && *fell == 5.f, "more than drop below: through the ground");
+    check(!race_hold_off(hold, {NAN, 50, 0}, 2000000, later), "a position that is not a number: nothing");
+    check(race_hold_line(3) == "[race] hold: 3 racer(s)", "the hold line");
+    check(race_pull_line("Kush\n", 76561198000000001, 4.24f) == "[race] Kush  (76561198000000001) back to the start: 4.2 m off",
+          "the pull-back line");
+
+    // Moves between two poses: crossing a zone between them.
+    const RaceZone gate{{50, 0, 0}, 2};
+    auto t = zone_entry(gate, {0, 0, 0}, {100, 0, 0});
+    check(t && std::abs(*t - 0.48f) < 1e-5f, "passed through between two poses: where it entered");
+    check(!zone_entry(gate, {0, 0, 0}, {40, 0, 0}), "short of it: nothing");
+    check(!zone_entry(gate, {0, 3, 0}, {100, 3, 0}), "past it: nothing");
+    t = zone_entry(gate, {0, 2, 0}, {100, 2, 0});
+    check(t && std::abs(*t - 0.5f) < 1e-5f, "touching it counts");
+    t = zone_entry(gate, {50, 1, 0}, {100, 1, 0});
+    check(t && *t == 0.f, "starting inside: at once");
+    t = zone_entry(gate, {50, 1, 0}, {50, 1, 0});
+    check(t && *t == 0.f && !zone_entry(gate, {0, 0, 0}, {0, 0, 0}), "standing still: inside or not");
+    t = zone_entry(gate, {0, 0, 0}, {100, 0, 0}, 0.6f);
+    check(!t, "left behind before `from`: nothing");
+    t = zone_entry(gate, {0, 0, 0}, {100, 0, 0}, 0.5f);
+    check(t && *t == 0.5f, "inside at `from`: at `from`");
+    check(!zone_entry(gate, {NAN, 0, 0}, {100, 0, 0}), "not a number: nothing");
+    {
+        // Two checkpoints and the finish in one move, in order; a teleport counts where it ends.
+        const std::vector<RaceZone> line{{{20, 0, 0}, 1}, {{40, 0, 0}, 1}};
+        const RaceZone end{{45, 0, 0}, 1};
+        std::size_t next{};
+        auto crossings = race_move(next, line, end, std::array<float, 3>{0, 0, 0}, {48, 0, 0});
+        check(next == 2 && crossings.checkpoints.size() == 2 && std::abs(crossings.checkpoints[0] - 19.f / 48) < 1e-5f &&
+                  std::abs(crossings.checkpoints[1] - 39.f / 48) < 1e-5f && crossings.finish && std::abs(*crossings.finish - 44.f / 48) < 1e-5f,
+              "checkpoints and finish in one move, each where it was passed");
+        next = 0;
+        crossings = race_move(next, line, end, std::array<float, 3>{40, 0, 0}, {20, 0, 0});
+        check(next == 1 && crossings.checkpoints.size() == 1 && !crossings.finish, "the second checkpoint before the first does not count");
+        next = 0;
+        crossings = race_move(next, {{{20, 0, 0}, 1}}, end, std::array<float, 3>{0, 0, 0}, {45, 60, 0});
+        check(next == 0 && !crossings.finish, "a teleport (over 50 m): what it passed does not count");
+        next = 1;
+        crossings = race_move(next, line, end, std::array<float, 3>{-100, 0, 0}, {44.5f, 0, 0});
+        check(next == 1 && !crossings.checkpoints.size() && !crossings.finish, "a teleport into the finish with a checkpoint left: nothing");
+        next = 2;
+        crossings = race_move(next, line, end, std::array<float, 3>{-100, 0, 0}, {44.5f, 0, 0});
+        check(crossings.finish && *crossings.finish == 1.f, "a teleport into the finish: at the pose's time");
+        next = 0;
+        crossings = race_move(next, {}, end, std::nullopt, {45, 0, 0});
+        check(crossings.finish && *crossings.finish == 1.f, "no pose before: where they are now");
+    }
+    // Their clock against the host's, and the race clock at a crossing.
+    {
+        PoseClock clock;
+        check(!clock.sample(1000000, 51000000) && clock.offset == 50000000, "the first pose starts the clock");
+        check(clock.sample(1033000, 51040000) && clock.offset == 50000000, "a later arrival does not move the offset");
+        check(clock.sample(1066000, 51060000) && clock.offset == 49994000, "an earlier one does");
+        check(!clock.sample(500000, 51100000) && clock.offset == 50600000, "a clock that went back starts over");
+        check(!clock.sample(600000, 54000000), "a long pause starts over");
+        // Poses sent at 10.0 s and 10.1 s of their clock, 2 s behind the host; started at 3 s.
+        check(race_crossing_ms(10000000, 10100000, 0.5f, 2000000, 3000000, 20000000) == 9050, "halfway between the poses");
+        check(race_crossing_ms(10000000, 10100000, 0.f, 2000000, 3000000, 20000000) == 9000 &&
+                  race_crossing_ms(10000000, 10100000, 1.f, 2000000, 3000000, 20000000) == 9100,
+              "at either pose");
+        check(race_crossing_ms(10000000, 10100000, 0.5f, -10000000, 3000000, 20000000) == 0, "never before the start");
+        check(race_crossing_ms(10000000, 10100000, 0.5f, 20000000, 3000000, 20000000) == 17000, "never after now");
+        // The same ride read at 20 ticks a second or at 60: the same time.
+        const RaceZone flag{{30.2f, 0, 0}, 0.5f};
+        for (const std::uint64_t tick : {16667ULL, 50000ULL, 120000ULL}) {
+            // 10 m/s, a pose every 1/30 s by their clock (offset 0, no delay), read at each tick.
+            std::size_t next{};
+            Racer r;
+            std::optional<std::uint64_t> crossed_ms;
+            for (std::uint64_t now = 0; now < 5000000 && !crossed_ms; now += tick) {
+                const std::uint64_t pose = now / 33333 * 33333; // their newest pose by now
+                const std::array<float, 3> at{static_cast<float>(pose) / 100000.f, 0, 0};
+                if (r.last && pose == r.last_sent) continue;
+                const auto c = race_move(next, {}, flag, r.last, at);
+                if (c.finish) crossed_ms = race_crossing_ms(r.last ? r.last_sent : pose, pose, *c.finish, 0, 0, now);
+                r.last = at;
+                r.last_sent = pose;
+            }
+            check(crossed_ms && *crossed_ms >= 2969 && *crossed_ms <= 2971, "the time does not depend on the tick rate");
+        }
+    }
+    {
+        // A crossing read late (their pose arrived late) but made earlier still places first:
+        // the host settles a time only race_settle_margin_ms after the clock passed it.
+        std::vector<Racer> two{Racer{.id = 1, .name = "A"}, Racer{.id = 2, .name = "B"}};
+        unsigned given{};
+        two[0].ms = 10000;
+        two[0].seq = 1;
+        check(race_settle(two, given, 10300 - race_settle_margin_ms, false).empty(), "not yet within the margin");
+        two[1].ms = 9990;
+        two[1].seq = 2;
+        const auto order = race_settle(two, given, 11100 - race_settle_margin_ms, false);
+        check(order.size() == 2 && order[0]->id == 2 && two[1].place == 1 && two[0].place == 2, "the earlier time first, though read later");
+    }
+    check(std::regex_match(race_finish_line(finished(76561198000000001, "Kush", 1, 48265)),
+                           std::regex(R"(^\[race\] (.+) \((\d+)\) finished (\d+) in ([\d.]+) s$)")) &&
+              race_finish_line(finished(76561198000000001, "Kush", 1, 48265)) == "[race] Kush (76561198000000001) finished 1 in 48.27 s",
+          "the finish line, two decimals, as the parser reads it");
     return 0;
 }

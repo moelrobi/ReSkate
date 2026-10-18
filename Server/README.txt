@@ -684,29 +684,59 @@ or Travel, and voice, distances, placement and kicks from the Multiplayer menu.
                                 racer must pass in order before the finish counts.
                                 Each one passed is logged, in order (several in one
                                 go where they overlap), with the race clock's time:
-                                "[race] <name> (<SteamID64>) checkpoint 2/5 in 31.4 s".
+                                "[race] <name> (<SteamID64>) checkpoint 2/5 in 31.42 s".
+                                A checkpoint or the finish counts when a racer's
+                                way between two of their poses passes through it
+                                (a jump of over 50 m, a teleport, only where it
+                                ends), at the moment it did by their poses' own
+                                timestamps, whatever the tick rate or the load.
   race-arm [<x y z> <radius>|off]   Show, set (radius 1-200 m) or clear the start
                                 zone, e.g. as a countdown begins. Used by the next
                                 race-start's false-start check, then cleared (also
                                 by race-stop and a map change).
-  race-start <SteamID64,SteamID64,...> [timeout <seconds>] [false-start dnf|<seconds>]
+  race-hold <SteamID64> <x y z> [<SteamID64> <x y z> ...] [radius <m>] [drop <m>]
+                                Hold racers (at most 64, also over several calls,
+                                one per racer) on their start spot until the race
+                                starts: each is teleported 2 m above their spot at
+                                once (when in the world), and back whenever they
+                                are more than radius (default 3 m) from it across
+                                or more than drop (default 4 m) below it, through
+                                the ground; poses from the first second after a
+                                teleport do not count, and nobody is sent back more
+                                often than every 1.5 s. Logged as "[race] hold: 3
+                                racer(s)" and, for each one sent back, "[race]
+                                <name> (<SteamID64>) back to the start: 4.2 m off".
+                                The game resets the skater's speed on a teleport.
+                                Holds end at race-start (at GO with a countdown,
+                                before the false-start check), race-stop, a map
+                                change, and for a racer who leaves.
+  race-hold [clear]             List the holds, or drop them all.
+  race-start <SteamID64,SteamID64,...> [timeout <seconds>] [false-start dnf|<seconds>] [countdown <seconds>]
                                 Time those players (at most 64, in the world) from
                                 now to the finish; the race ends when all finished
                                 or left, or after the timeout (default 300 s, at
                                 most 3600). Logged as
-                                "[race] <name> (<SteamID64>) finished <place> in 48.3 s"
-                                and "[race] ended: 1. <name> 48.3 s, <name> DNF".
+                                "[race] <name> (<SteamID64>) finished <place> in 48.27 s"
+                                and "[race] ended: 1. <name> 48.27 s, <name> DNF".
+                                countdown (1-10 s): the server counts down on cards
+                                for everyone ("5", "4", ... "GO!"), logs
+                                "[race] countdown 5 s", keeps the holds until GO and
+                                starts the clock (and the false-start check) at GO,
+                                with the "[race] started" line then. race-stop
+                                before GO logs "[race] countdown stopped by <name>",
+                                a map change "[race] countdown dropped: the map changed".
                                 false-start: with a start zone armed, a racer
                                 outside it now has a false start, logged as
                                 "[race] <name> (<SteamID64>) false start: 12.3 m from the start".
                                 dnf: they race but are not placed ("<name> DNF
                                 (false start)" in the results). <seconds> (1-60):
                                 added to their time, places go by the penalised
-                                times ("2. <name> 51.0 s (+5 s false start)"); their
+                                times ("2. <name> 51.00 s (+5 s false start)"); their
                                 finish line carries the penalised time and place and
                                 is logged once that place is certain, when the race
                                 clock reaches their penalised time or the race ends.
-  race-stop                     End the race now; the rest did not finish.
+  race-stop                     End the race now; the rest did not finish. Also stops
+                                a countdown and drops the holds.
   activity-log on|off           Log player activity (see activity_log).
   words [reload | global on|off]
                                 This server's chat words: what is in use, read

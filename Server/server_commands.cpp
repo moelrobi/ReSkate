@@ -27,6 +27,7 @@ constexpr std::string_view help_text =
     "poll-run <command with {answer}> | <question> | <answer> | <answer>...\n"
     "race-finish [<x y z> <radius>|off] | race-checkpoint [add <x y z> <radius>|clear] | race-arm [<x y z> <radius>|off]\n"
     "race-start <SteamID64,SteamID64,...> [timeout <s>] [false-start dnf|<s>] | race-stop\n"
+    "race-hold <SteamID64> <x y z> [<SteamID64> <x y z> ...] [radius <m>] [drop <m>] | race-hold [clear] | race-start ... countdown <1-10 s>\n"
     "announce <text> | announce-to <player> <text> | announcements [list|add <text>|remove <n>|clear|interval <minutes>|off]\n"
     "map-pool [add|remove <map>|clear] | rotation [<minutes>|off | vote on|off | stay <minutes>|off | announce on|off | extend [minutes]]\n"
     "park <lot> <layout> | park random | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
@@ -76,7 +77,7 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return text;
     };
     if (name.empty() || name == "help") return std::string(help_text);
-    if (name == "race-finish" || name == "race-checkpoint" || name == "race-arm" || name == "race-start" || name == "race-stop")
+    if (name == "race-finish" || name == "race-checkpoint" || name == "race-arm" || name == "race-start" || name == "race-stop" || name == "race-hold")
         return race_command(name, argument, admin);
     if (name == "status")
         return config_.name + " | " + map_name() + " | " + std::to_string(players()) + "/" +

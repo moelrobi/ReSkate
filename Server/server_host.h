@@ -270,10 +270,12 @@ class Host {
         guest.away_warned = false;
     }
     void remove_away();
-    // Races (server_race.cpp): race-finish, race-checkpoint, race-start, race-stop; timed every tick.
+    // Races (server_race.cpp): race-finish, race-checkpoint, race-hold, race-start, race-stop; timed every tick.
     Race race_;
     std::string race_command(std::string_view name, std::string_view argument, std::uint64_t admin);
     void tick_race();
+    std::string begin_race(const RaceStart &start);
+    static std::uint64_t race_pose_sent(const Guest &guest);
     bool vote_recount_{}; // a player left: recount in tick(), never while guests_ is being walked
     std::map<std::uint64_t, std::uint64_t> vote_cooldowns_;
     std::uint64_t map_since_{}; // rotation clock start: the last map change, or while nobody is on

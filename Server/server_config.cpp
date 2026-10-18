@@ -795,7 +795,7 @@ std::string custom_votes_error(const std::vector<CustomVote> &votes) {
     return {};
 }
 bool custom_command_name_free(std::string_view name) noexcept {
-    for (const std::string_view taken : {"race-finish", "race-checkpoint", "race-arm", "race-start", "race-stop"}) // server_race.cpp
+    for (const std::string_view taken : {"race-finish", "race-checkpoint", "race-arm", "race-start", "race-stop", "race-hold"}) // server_race.cpp
         if (name == taken) return false;
     // The chat's own commands, then the server commands admins type as /<command>.
     for (const std::string_view taken :
