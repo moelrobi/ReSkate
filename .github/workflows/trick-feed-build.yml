@@ -9,6 +9,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the Spotify helper's crates (Runtime.cmake looks for the windows import library in the cargo registry)
+        working-directory: SpotifyHelper
+        run: cargo fetch
       - name: Configure
         run: cmake --preset vs2022-x64 -DDINGOSDK_BUILD_PLUGIN_TESTS=ON
       - name: Build ReSkate.dll and the trick feed test
