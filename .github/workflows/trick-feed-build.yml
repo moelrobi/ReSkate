@@ -1,0 +1,24 @@
+name: trick-feed build
+on:
+  push:
+    branches: [ci/trick-feed-build]
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset vs2022-x64 -DDINGOSDK_BUILD_PLUGIN_TESTS=ON
+      - name: Build ReSkate.dll and the trick feed test
+        run: cmake --build build/vs2022-x64 --config Release --parallel 4 --target dingosdk_runtime dingosdk_trick_feed_songs_tests
+      - name: Run the trick feed test
+        run: ctest --test-dir build/vs2022-x64 -C Release -R trick_feed_songs --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkate-dll-trick-feed-fix
+          path: |
+            build/vs2022-x64/Release/ReSkate.dll
+            build/vs2022-x64/Release/ReSkate.pdb
+          if-no-files-found: warn
